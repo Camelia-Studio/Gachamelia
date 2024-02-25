@@ -57,8 +57,71 @@ client.on('message', message => {
             const channelID = args[2].replace(/<#|>/g, '');
             farewellChannel = message.guild.channels.cache.get(channelID);
             message.channel.send(`Canal d'adieu défini sur : ${farewellChannel}`);
+        } else if (args.length === 3 && args[1] === 'messageadieu') {
+            // Définir le message d'adieu
+            farewellMessage = args.slice(2).join(' ');
+            message.channel.send(`Message d'adieu défini sur : ${farewellMessage}`);
+        } else if (args.length === 3 && args[1] === 'imageadieu') {
+            // Définir l'image d'adieu
+            farewellImage = args[2];
+            message.channel.send(`Image d'adieu définie sur : ${farewellImage}`);
+        } else if (args.length === 3 && args[1] === 'bienvenueimage') {
+            // Définir l'image de bienvenue
+            welcomeImage = args[2];
+            message.channel.send(`Image de bienvenue définie sur : ${welcomeImage}`);
+        } else if (args.length === 3 && args[1] === 'rangauto') {
+            // Définir la commande pour le rang automatique
+            autorangCommand = args[2];
+            message.channel.send(`Commande pour le rang automatique définie sur : ${autorangCommand}`);
+        } else if (args.length === 3 && args[1] === 'rangs') {
+            // Afficher les rôles et leurs messages associés
+            message.channel.send(`Messages de bienvenue et rôles associés : 
+            - Rang B : ${welcomeMessages.find(msg => msg.role === "Rang B").message}
+            - Rang A : ${welcomeMessages.find(msg => msg.role === "Rang A").message}
+            - Rang S : ${welcomeMessages.find(msg => msg.role === "Rang S").message}
+            - Rang S+ : ${welcomeMessages.find(msg => msg.role === "Rang S+").message}
+            `);
+        } else if (args.length === 5 && args[1] === 'ajoutermessage') {
+            // Ajouter un nouveau message de bienvenue
+            const newRole = args[2];
+            const newProbability = parseInt(args[3]);
+            const newMessage = args.slice(4).join(' ');
+            welcomeMessages.push({ message: newMessage, role: newRole, probability: newProbability });
+            message.channel.send(`Nouveau message de bienvenue ajouté pour le rôle ${newRole} avec une probabilité de ${newProbability}%.`);
+        } else if (args.length === 4 && args[1] === 'modifierprobabilite') {
+            // Modifier la probabilité d'un message de bienvenue existant
+            const roleName = args[2];
+            const newProbability = parseInt(args[3]);
+            const index = welcomeMessages.findIndex(msg => msg.role === roleName);
+            if (index !== -1) {
+                // Calculer la somme des probabilités actuelles
+                let currentTotal = welcomeMessages.reduce((total, msg) => total + msg.probability, 0);
+                // Calculer la différence entre la nouvelle probabilité et l'ancienne
+                let difference = newProbability - welcomeMessages[index].probability;
+                // Mettre à jour la probabilité
+                welcomeMessages[index].probability = newProbability;
+                // Vérifier si le total est égal à 100%
+                if (currentTotal + difference !== 100) {
+                    message.channel.send(`La somme des probabilités n'est pas égale à 100%. Veuillez modifier une autre probabilité pour ajuster.`);
+                } else {
+                    message.channel.send(`Probabilité du message de bienvenue pour le rôle ${roleName} modifiée à ${newProbability}%.`);
+                }
+            } else {
+                message.channel.send(`Le rôle ${roleName} n'existe pas.`);
+            }
+        } else if (args.length === 4 && args[1] === 'changerrole') {
+            // Changer le rôle associé à un message de bienvenue existant
+            const roleName = args[2];
+            const newRoleName = args[3];
+            const index = welcomeMessages.findIndex(msg => msg.role === roleName);
+            if (index !== -1) {
+                welcomeMessages[index].role = newRoleName;
+                message.channel.send(`Rôle associé au message de bienvenue pour le rôle ${roleName} changé en ${newRoleName}.`);
+            } else {
+                message.channel.send(`Le rôle ${roleName} n'existe pas.`);
+            }
         } else {
-            message.channel.send("Utilisation : `/gachaoptions bienvenue <nom_du_canal>` pour définir le canal de bienvenue ou `/gachaoptions adieu <nom_du_canal>` pour définir le canal d'adieu.");
+            message.channel.send("Options disponibles : \n- `/gachaoptions bienvenue <nom_du_canal>` pour définir le canal de bienvenue\n- `/gachaoptions adieu <nom_du_canal>` pour définir le canal d'adieu\n- `/gachaoptions messageadieu <message>` pour définir le message d'adieu\n- `/gachaoptions imageadieu <lien_de_l'image>` pour définir l'image d'adieu\n- `/gachaoptions bienvenueimage <lien_de_l'image>` pour définir l'image de bienvenue\n- `/gachaoptions rangauto <commande>` pour définir la commande pour le rang automatique\n- `/gachaoptions rangs` pour afficher les rôles et leurs messages associés\n- `/gachaoptions ajoutermessage <role> <probabilité> <message>` pour ajouter un nouveau message de bienvenue\n- `/gachaoptions modifierprobabilite <role> <probabilité>` pour modifier la probabilité d'un message de bienvenue\n- `/gachaoptions changerrole <role> <nouveau_role>` pour changer le rôle associé à un message de bienvenue");
         }
     }
 });
