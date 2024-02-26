@@ -335,3 +335,95 @@ client.on('message', message => {
         message.channel.send(`Le rôle déclenchant le Rang ULTRA a été défini sur "${roleName}".`);
     }
 });
+
+// Variable globale pour stocker les temps de connexion des membres des salons vocaux
+const voiceChannelConnections = {};
+// Variable globale pour stocker les temps de connexion des membres des salons vocaux en cooldown
+const xpCooldowns = {};
+// Variable globale pour stocker les XP quotidiennes des utilisateurs
+const userDailyXP = {};
+
+// Fonction pour surveiller la connexion des membres aux salons vocaux
+client.on('voiceStateUpdate', (oldState, newState) => {
+    const user = newState.member;
+    // Vérifier si l'utilisateur existe et n'est pas un bot
+    if (!user || user.user.bot) return;
+
+    const oldChannel = oldState.channel;
+    const newChannel = newState.channel;
+
+    // L'utilisateur est entré dans un salon vocal
+    if (!oldChannel && newChannel) {
+        voiceChannelConnections[user.id] = Date.now(); // Enregistrer le moment de la connexion
+    } 
+    // L'utilisateur est sorti d'un salon vocal
+    else if (oldChannel && !newChannel) {
+        // Vérifier si l'utilisateur est enregistré comme étant connecté à un salon vocal
+        if (voiceChannelConnections[user.id]) {
+            const timeSpentInVoiceChannel = Math.floor((Date.now() - voiceChannelConnections[user.id]) / 1000); // Calculer la durée en secondes
+            const xpGained = calculateXPFromTime(timeSpentInVoiceChannel, user); // Convertir la durée en XP
+            addXP(user, xpGained); // Ajouter l'XP à l'utilisateur
+            delete voiceChannelConnections[user.id]; // Supprimer l'enregistrement de la connexion
+        }
+    }
+});
+
+// Fonction pour calculer l'XP à partir du temps passé dans un salon vocal
+function calculateXPFromTime(timeSpentInVoiceChannel, user) {
+    // Déterminer le multiplicateur d'XP en fonction du boost Nitro
+    let xpMultiplier = 1;
+    if (user.roles.cache.some(role => role.name === 'Booster')) {
+        xpMultiplier = 2;
+    }
+
+    // Vérifier si l'utilisateur est en cooldown pour le salon vocal
+    if (!xpCooldowns[user.id]) {
+        // Appliquer le multiplicateur d'XP
+        const xpPerMinute = 1 * xpMultiplier;
+        const xpGained = Math.floor(timeSpentInVoiceChannel / 120) * xpPerMinute; // 1 XP pour 2 minutes
+        // Appliquer le plafond d'XP quotidien
+        if (xpGained > 0) {
+            if (xpMultiplier === 1 && getUserDailyXP(user) + xpGained > 200) {
+                xpGained = 200 - getUserDailyXP(user);
+            } else if (xpMultiplier === 2 && getUserDailyXP(user) + xpGained > 500) {
+                xpGained = 500 - getUserDailyXP(user);
+            }
+            updateUserDailyXP(user, xpGained);
+        }
+        return xpGained;
+    } else {
+        return 0; // Aucune XP gagnée pendant le cooldown
+    }
+}
+
+// Fonction pour ajouter de l'XP à un utilisateur
+function addXP(user, amount) {
+    // Récupérer l'XP actuelle de l'utilisateur
+    let currentXP = getUserXP(user);
+    // Ajouter la quantité spécifiée à l'XP actuelle
+    currentXP += amount;
+    // Mettre à jour l'XP de l'utilisateur
+    setUserXP(user, currentXP);
+}
+
+// Fonction pour récupérer l'XP quotidien d'un utilisateur
+function getUserDailyXP(user) {
+    // Récupérer l'XP quotidien de l'utilisateur depuis le stockage approprié
+    return userDailyXP[user.id] || 0; // Si l'XP quotidien n'est pas défini, retourner 0
+}
+
+// Fonction pour mettre à jour l'XP quotidien d'un utilisateur
+function updateUserDailyXP(user, amount) {
+    // Mettre à jour l'XP quotidien de l'utilisateur dans le stockage approprié
+    userDailyXP[user.id] = amount;
+}
+
+// Fonction pour exclure des salons vocaux du décompte de l'XP
+client.on('message', message => {
+    if (message.member.hasPermission('ADMINISTRATOR') && message.content.startsWith('/gachaoptions excludevoice')) {
+        const channelID = message.content.split(' ')[1];
+        // Ajouter le salon vocal à la liste des exclusions
+        excludedVoiceChannels.push(channelID);
+        message.channel.send(`Le salon vocal avec l'ID ${channelID} a été exclu du décompte de l'XP.`);
+    }
+});
