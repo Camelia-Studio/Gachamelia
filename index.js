@@ -198,6 +198,76 @@ client.on('guildMemberRemove', member => {
 // Connexion du bot à Discord
 client.login('TOKEN_DU_BOT');
 
+const sqlite3 = require('sqlite3').verbose();
+
+// Connexion à la base de données SQLite
+const db = new sqlite3.Database('./userXP.db', (err) => {
+    if (err) {
+        console.error('Erreur lors de la connexion à la base de données :', err.message);
+    } else {
+        console.log('Connexion à la base de données réussie.');
+        // Créer une table pour stocker l'XP des utilisateurs si elle n'existe pas déjà
+        db.run(`CREATE TABLE IF NOT EXISTS userXP (
+            userId TEXT PRIMARY KEY,
+            xp INTEGER DEFAULT 0,
+            dailyXP INTEGER DEFAULT 0
+        )`);
+    }
+});
+
+// Fonction pour récupérer l'XP d'un utilisateur depuis la base de données
+function getUserXP(user) {
+    return new Promise((resolve, reject) => {
+        db.get('SELECT xp FROM userXP WHERE userId = ?', [user.id], (err, row) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(row ? row.xp : 0);
+            }
+        });
+    });
+}
+
+// Fonction pour mettre à jour l'XP d'un utilisateur dans la base de données
+function setUserXP(user, xp) {
+    db.run('INSERT OR REPLACE INTO userXP (userId, xp) VALUES (?, ?)', [user.id, xp], (err) => {
+        if (err) {
+            console.error('Erreur lors de la mise à jour de l\'XP de l\'utilisateur :', err.message);
+        }
+    });
+}
+
+// Fonction pour récupérer l'XP quotidien d'un utilisateur depuis la base de données
+function getUserDailyXP(user) {
+    return new Promise((resolve, reject) => {
+        db.get('SELECT dailyXP FROM userXP WHERE userId = ?', [user.id], (err, row) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(row ? row.dailyXP : 0);
+            }
+        });
+    });
+}
+
+// Fonction pour mettre à jour l'XP quotidien d'un utilisateur dans la base de données
+function updateUserDailyXP(user, amount) {
+    db.run('INSERT OR REPLACE INTO userXP (userId, dailyXP) VALUES (?, ?)', [user.id, amount], (err) => {
+        if (err) {
+            console.error('Erreur lors de la mise à jour de l\'XP quotidienne de l\'utilisateur :', err.message);
+        }
+    });
+}
+
+// Supprimer l'utilisateur de la base de données lorsque celui-ci quitte le serveur
+client.on('guildMemberRemove', member => {
+    db.run('DELETE FROM userXP WHERE userId = ?', [member.id], (err) => {
+        if (err) {
+            console.error('Erreur lors de la suppression de l\'utilisateur de la base de données :', err.message);
+        }
+    });
+});
+
 // Variables globales pour stocker les paramètres XP et les canaux exclus
 let excludedChannels = [];
 let xpMultiplierChannels = [];
@@ -233,8 +303,21 @@ client.on('message', message => {
 
 // Fonction pour ajouter de l'XP à un utilisateur
 function addXP(user, amount) {
-    // Logique pour ajouter l'XP à l'utilisateur
-    // ...
+    // Récupérer l'XP actuelle de l'utilisateur depuis la base de données
+    getUserXP(user)
+        .then(currentXP => {
+            // Ajouter la quantité spécifiée à l'XP actuelle
+            const newXP = currentXP + amount;
+            
+            // Mettre à jour l'XP de l'utilisateur dans la base de données
+            setUserXP(user, newXP);
+
+            // Vérifier si l'utilisateur a atteint un nouveau rang
+            checkAndUpdateUserRank(user, newXP);
+        })
+        .catch(err => {
+            console.error('Erreur lors de l\'ajout de l\'XP à l\'utilisateur :', err);
+        });
 
     // Vérifier si l'utilisateur a atteint un nouveau rang
     const currentXP = getUserXP(user);
@@ -263,14 +346,30 @@ function getUserRank(user) {
 
 // Fonction pour obtenir l'XP d'un utilisateur
 function getUserXP(user) {
-    // Logique pour récupérer l'XP d'un utilisateur
-    // ...
+    return new Promise((resolve, reject) => {
+        db.get('SELECT xp FROM userXP WHERE userId = ?', [user.id], (err, row) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(row ? row.xp : 0);
+            }
+        });
+    });
 }
 
 // Fonction pour obtenir le rôle associé à un rang
 function getRoleFromRank(rank) {
-    // Logique pour obtenir le rôle associé à un rang
-    // ...
+    // Tableau associant les rangs aux noms de rôles
+    const rankRoles = {
+        'Rang B': 'Role B',
+        'Rang A': 'Role A',
+        'Rang S': 'Role S',
+        'Rang S+': 'Role S+'
+        // Ajouter d'autres rangs et rôles au besoin
+    };
+
+    // Renvoyer le nom du rôle associé au rang spécifié
+    return rankRoles[rank];
 }
 
 // Commande pour obtenir le nouveau rang
