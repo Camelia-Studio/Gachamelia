@@ -197,3 +197,141 @@ client.on('guildMemberRemove', member => {
 
 // Connexion du bot à Discord
 client.login('TOKEN_DU_BOT');
+
+// Variables globales pour stocker les paramètres XP et les canaux exclus
+let excludedChannels = [];
+let xpMultiplierChannels = [];
+let xpCooldowns = {};
+
+client.on('message', message => {
+    // Vérifier si le message est dans un salon exclu ou provenant du bot lui-même
+    if (excludedChannels.includes(message.channel.id) || message.author.bot) return;
+
+    // Vérifier si l'utilisateur est un booster
+    let xpMultiplier = 1;
+    if (message.member.roles.cache.some(role => role.name === 'Booster')) {
+        xpMultiplier = 2;
+    }
+
+    // Vérifier si le salon a un multiplicateur d'XP
+    if (xpMultiplierChannels.includes(message.channel.id)) {
+        xpMultiplier *= 2;
+    }
+
+    // Vérifier si l'utilisateur est déjà en cooldown
+    if (xpCooldowns[message.author.id]) return;
+
+    // Ajouter l'XP à l'utilisateur
+    addXP(message.author, 1 * xpMultiplier);
+
+    // Mettre l'utilisateur en cooldown pour 2 minutes
+    xpCooldowns[message.author.id] = true;
+    setTimeout(() => {
+        delete xpCooldowns[message.author.id];
+    }, 120000);
+});
+
+// Fonction pour ajouter de l'XP à un utilisateur
+function addXP(user, amount) {
+    // Logique pour ajouter l'XP à l'utilisateur
+    // ...
+
+    // Vérifier si l'utilisateur a atteint un nouveau rang
+    const currentXP = getUserXP(user);
+    const newRank = calculateRank(currentXP + amount);
+    if (newRank !== getUserRank(user)) {
+        const newRole = getRoleFromRank(newRank);
+        const notificationMessage = `Héhé ! C'est que tu as bien xp dit donc, tu peux désormais évoluer au ${newRole} ! Pour cela, rien de plus simple, utilise la commande /gachajaiunegrosseépée.`;
+        user.send(notificationMessage);
+    }
+}
+
+// Fonction pour calculer le nouveau rang à partir de l'XP
+function calculateRank(xp) {
+    if (xp >= 66666) return "Rang S++";
+    if (xp >= 10000) return "Rang S+";
+    if (xp >= 1000) return "Rang S";
+    if (xp >= 100) return "Rang A";
+    return "Rang B";
+}
+
+// Fonction pour obtenir le rang d'un utilisateur
+function getUserRank(user) {
+    const xp = getUserXP(user);
+    return calculateRank(xp);
+}
+
+// Fonction pour obtenir l'XP d'un utilisateur
+function getUserXP(user) {
+    // Logique pour récupérer l'XP d'un utilisateur
+    // ...
+}
+
+// Fonction pour obtenir le rôle associé à un rang
+function getRoleFromRank(rank) {
+    // Logique pour obtenir le rôle associé à un rang
+    // ...
+}
+
+// Commande pour obtenir le nouveau rang
+client.on('message', message => {
+    if (message.content === '/gachajaiunegrosseépée') {
+        const user = message.author;
+        const currentXP = getUserXP(user);
+        const newRank = calculateRank(currentXP);
+        const roles = ['Rang B', 'Rang A', 'Rang S', 'Rang S+', 'Rang S++'];
+        const index = roles.indexOf(newRank);
+        if (index !== -1) {
+            const newRole = roles[index + 1];
+            const guildRole = message.guild.roles.cache.find(role => role.name === newRole);
+            if (guildRole) {
+                const currentRole = message.guild.roles.cache.find(role => role.name === getUserRank(user));
+                if (currentRole) {
+                    message.member.roles.remove(currentRole);
+                }
+                message.member.roles.add(guildRole);
+                message.reply(`Félicitations ! Vous avez maintenant atteint le ${newRole}.`);
+            }
+        }
+    }
+});
+
+// Commande pour exclure des salons du décompte de l'XP
+client.on('message', message => {
+    if (message.member.hasPermission('ADMINISTRATOR') && message.content.startsWith('/excludesalon')) {
+        const channelID = message.content.split(' ')[1];
+        excludedChannels.push(channelID);
+        message.channel.send(`Le salon avec l'ID ${channelID} a été exclu du décompte de l'XP.`);
+    }
+});
+
+// Commande pour multiplier l'XP dans certains salons
+client.on('message', message => {
+    if (message.member.hasPermission('ADMINISTRATOR') && message.content.startsWith('/multiplierxp')) {
+        const channelID = message.content.split(' ')[1];
+        xpMultiplierChannels.push(channelID);
+        message.channel.send(`Le salon avec l'ID ${channelID} a maintenant un multiplicateur d'XP.`);
+    }
+});
+
+// Variable globale pour stocker le rôle déclenchant le Rang ULTRA
+let ultraRole = null;
+
+// Fonction pour vérifier si l'utilisateur a le rôle déclenchant le Rang ULTRA
+function hasUltraRole(user) {
+    return user.roles.cache.some(role => role === ultraRole);
+}
+
+// Fonction pour obtenir le rôle "Rang ULTRA" et l'assigner à la variable globale
+function setUltraRole(roleName) {
+    ultraRole = message.guild.roles.cache.find(role => role.name === roleName);
+}
+
+// Commande pour définir le rôle déclenchant le Rang ULTRA
+client.on('message', message => {
+    if (message.member.hasPermission('ADMINISTRATOR') && message.content.startsWith('/gachaoptions ultrarole')) {
+        const roleName = message.content.split(' ')[1];
+        setUltraRole(roleName);
+        message.channel.send(`Le rôle déclenchant le Rang ULTRA a été défini sur "${roleName}".`);
+    }
+});
