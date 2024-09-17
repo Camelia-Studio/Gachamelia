@@ -1,0 +1,20 @@
+{
+  "name": "gachamelia",
+  "version": "1.0.0",
+  "description": "Transforme ton serveur Discord en *gacha* géant !",
+  "main": "old/index.js",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc --build",
+    "start": "npm run build && node dist/index.js",
+    "start:clean": "npm run clean && npm run build && node dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "discord.js": "^14.16.2",
+    "glob": "^11.0.0",
+    "typescript": "^5.6.2"
+  }
+}

@@ -1,0 +1,10 @@
+.idea/
+.vscode/
+.fleet/
+node_modules/
+dist/
+*.iml
+tsconfig.tsbuildinfo
+
+data/*.json
+!data/*.example.json
