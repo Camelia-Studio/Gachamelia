@@ -1,9 +1,9 @@
-import CustomClient from "../classes/CustomClient";
-import {Events} from "discord.js";
+import {CustomClient} from "../classes/CustomClient";
+import {ClientEvents} from "discord.js";
 
-export default interface IEvent {
+export interface IEvent {
     client: CustomClient;
-    name: Events;
+    name: keyof ClientEvents;
     description: string;
     once: boolean;
 

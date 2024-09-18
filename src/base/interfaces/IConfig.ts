@@ -1,3 +1,3 @@
-export default interface IConfig {
+export interface IConfig {
     token: string;
 }

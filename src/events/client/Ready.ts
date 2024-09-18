@@ -1,7 +1,7 @@
-import Event from '../../base/classes/Event';
-import CustomClient from "../../base/classes/CustomClient";
+import {Event} from '../../base/classes/Event';
+import {CustomClient} from "../../base/classes/CustomClient";
 import {Events} from "discord.js";
-export default class Ready extends Event {
+export class Ready extends Event {
     constructor(client: CustomClient) {
         super(client, {
             name: Events.ClientReady,

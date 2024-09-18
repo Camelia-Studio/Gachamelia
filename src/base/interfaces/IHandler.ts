@@ -1,3 +1,4 @@
-export default interface IHandler {
+export interface IHandler {
     loadEvents(): void;
+    loadCommands(): void;
 }
