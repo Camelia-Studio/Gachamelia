@@ -1,6 +1,7 @@
 import {Event} from '../../base/classes/Event';
 import {CustomClient} from "../../base/classes/CustomClient";
-import {Events} from "discord.js";
+import {Collection, Events, REST, Routes} from "discord.js";
+import {Command} from "../../base/classes/Command";
 export class Ready extends Event {
     constructor(client: CustomClient) {
         super(client, {
@@ -10,7 +11,38 @@ export class Ready extends Event {
         });
     }
 
-    execute(...args: any[]): void {
+    async execute(...args: any[]): Promise<void> {
         console.log(`Connecté en tant que ${this.client.user?.tag}!`);
+
+        const commands: object[] = this.getJson(this.client.commands);
+
+        const rest = new REST({version: '10'}).setToken(this.client.config.token);
+
+        const setCommands: any = await rest.put(
+            Routes.applicationCommands(this.client.user?.id!),
+            {
+                body: commands
+            }
+        );
+
+        console.log(`${setCommands.length} Commandes mises à jours avec succès !`);
+
+
+    }
+
+    private getJson(commands: Collection<string, Command>): object[] {
+        const data: object[] = [];
+
+        commands.forEach((command: Command) => {
+            data.push({
+                name: command.name,
+                description: command.description,
+                options: command.options,
+                default_member_permissions: command.default_member_permissions.toString(),
+                dm_permission: command.dm_permission,
+            })
+        });
+
+        return data;
     }
 }

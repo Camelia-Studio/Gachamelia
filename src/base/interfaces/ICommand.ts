@@ -9,7 +9,7 @@ export interface ICommand {
     category: Category;
     options: object;
     default_member_permissions: bigint;
-    dm_permissions: boolean;
+    dm_permission: boolean;
     cooldown: number;
 
     execute(interaction: ChatInputCommandInteraction): void;

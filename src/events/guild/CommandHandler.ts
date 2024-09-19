@@ -33,12 +33,24 @@ export class CommandHandler extends Event {
         const cooldownAmount = (command.cooldown || 3) * 1000;
 
         if (timestamps.has(interaction.user.id) && now < (timestamps.get(interaction.user.id) || 0) + cooldownAmount) {
+            const timeLeft = (((timestamps.get(interaction.user.id) || 0) + cooldownAmount - now) / 1000).toFixed(1);
             await interaction.reply({
-                content: `Veuillez patienter ${((timestamps.get(interaction.user.id) || 0) + cooldownAmount - now) / 1000} secondes avant de réutiliser la commande \`${command.name}\``
-            })
+                content: `Veuillez patienter ${timeLeft} secondes avant de réutiliser la commande \`${command.name}\``,
+                ephemeral: true
+            });
+
             return;
         }
+        timestamps.set(interaction.user.id, now);
+        setTimeout(() => timestamps.delete(interaction.user.id), cooldownAmount);
 
-        command.execute(interaction);
+        try {
+            const subCommandGroup = interaction.options.getSubcommandGroup(false);
+            const subCommand = `${interaction.commandName}${subCommandGroup ? `.${subCommandGroup}` : ''}.${interaction.options.getSubcommand(false)}` || '';
+
+            this.client.subCommands.get(subCommand)?.execute(interaction) || command.execute(interaction);
+        } catch (error) {
+            console.error(error);
+        }
     }
 }

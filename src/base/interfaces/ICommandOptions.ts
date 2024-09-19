@@ -6,6 +6,6 @@ export interface ICommandOptions {
     category: Category;
     options: object;
     default_member_permissions: bigint;
-    dm_permissions: boolean;
+    dm_permission: boolean;
     cooldown: number;
 }

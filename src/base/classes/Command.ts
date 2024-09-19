@@ -11,7 +11,7 @@ export class Command implements ICommand {
     category: Category;
     options: object;
     default_member_permissions: bigint;
-    dm_permissions: boolean;
+    dm_permission: boolean;
     cooldown: number;
 
     constructor(client: CustomClient, options: ICommandOptions) {
@@ -21,7 +21,7 @@ export class Command implements ICommand {
         this.category = options.category;
         this.options = options.options;
         this.default_member_permissions = options.default_member_permissions;
-        this.dm_permissions = options.dm_permissions;
+        this.dm_permission = options.dm_permission;
         this.cooldown = options.cooldown;
     }
 
