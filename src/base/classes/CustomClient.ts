@@ -4,6 +4,7 @@ import {Client, Collection, GatewayIntentBits} from "discord.js";
 import {Handler} from "./Handler";
 import {Command} from "./Command";
 import {SubCommand} from "./SubCommand";
+import {Config} from "./LoadConfig";
 
 export class CustomClient extends Client implements ICustomClient {
     config: IConfig;
@@ -18,8 +19,11 @@ export class CustomClient extends Client implements ICustomClient {
                 return GatewayIntentBits[a as keyof typeof GatewayIntentBits];
             }),
         })
+        // On ajoute le support de dotenv pour la config plutôt qu'un fichier JSON
+        require('dotenv').config();
 
-        this.config = require(`${process.cwd()}/data/config.json`);
+        // On charge dynamiquement la config
+        this.config = Config.load();
         this.handler = new Handler(this);
         this.commands = new Collection();
         this.subCommands = new Collection();

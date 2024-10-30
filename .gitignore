@@ -6,5 +6,6 @@ dist/
 *.iml
 tsconfig.tsbuildinfo
 
-data/*.json
-!data/*.example.json
+.env
+.env.*
+!.env.example
