@@ -17,9 +17,10 @@ export class Ready extends Event {
         const commands: object[] = this.getJson(this.client.commands);
 
         const rest = new REST({version: '10'}).setToken(this.client.config.token);
+        const guildId = this.client.config.guildId;
 
         const setCommands: any = await rest.put(
-            Routes.applicationCommands(this.client.user?.id!),
+            Routes.applicationGuildCommands(this.client.user?.id!, guildId),
             {
                 body: commands
             }
