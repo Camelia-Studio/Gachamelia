@@ -1,0 +1,15 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: gachamelia
+      MYSQL_USER: gachamelia
+      MYSQL_PASSWORD: gachamelia
+    ports:
+      - "3310:3306"
+    volumes:
+      - mysql_gachamelia_data:/var/lib/mysql
+
+volumes:
+  mysql_gachamelia_data:

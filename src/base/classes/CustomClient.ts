@@ -5,6 +5,10 @@ import {Handler} from "./Handler";
 import {Command} from "./Command";
 import {SubCommand} from "./SubCommand";
 import {Config} from "./LoadConfig";
+import {Database} from "./Database";
+import {IDatabaseConfig} from "../interfaces/IDatabaseConfig";
+import {Dialect} from "sequelize";
+import {User} from "../models/User";
 
 export class CustomClient extends Client implements ICustomClient {
     config: IConfig;
@@ -12,6 +16,7 @@ export class CustomClient extends Client implements ICustomClient {
     commands: Collection<string, Command>;
     subCommands: Collection<string, SubCommand>;
     cooldowns: Collection<string, Collection<string, number>>;
+    database: Database;
 
     constructor() {
         super({
@@ -24,12 +29,28 @@ export class CustomClient extends Client implements ICustomClient {
 
         // On charge dynamiquement la config
         this.config = Config.load();
+
+        const dbConfig: IDatabaseConfig = {
+            dialect: this.config.dbDialect as Dialect,
+            host: this.config.dbHost,
+            port: this.config.dbPort,
+            username: this.config.dbUsername,
+            password: this.config.dbPassword,
+            database: this.config.dbName
+        };
+
+        this.database = new Database(dbConfig);
         this.handler = new Handler(this);
         this.commands = new Collection();
         this.subCommands = new Collection();
         this.cooldowns = new Collection();
     }
     async init(): Promise<void> {
+        await this.database.connect();
+        User.initModel(this.database.getSequelize());
+        await this.database.sync({
+            alter: true
+        });
         await this.LoadHandlers();
         this.login(this.config.token).catch(console.error);
     }

@@ -2,6 +2,7 @@ import {Event} from '../../base/classes/Event';
 import {CustomClient} from "../../base/classes/CustomClient";
 import {Collection, Events, REST, Routes} from "discord.js";
 import {Command} from "../../base/classes/Command";
+import {createAllUsers} from "../../base/utils/GachaUtils";
 export class Ready extends Event {
     constructor(client: CustomClient) {
         super(client, {
@@ -28,7 +29,7 @@ export class Ready extends Event {
 
         console.log(`${setCommands.length} Commandes mises à jours avec succès !`);
 
-
+        await createAllUsers(this.client);
     }
 
     private getJson(commands: Collection<string, Command>): object[] {
