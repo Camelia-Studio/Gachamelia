@@ -52,10 +52,10 @@ export async function createAllUsers(client: CustomClient): Promise<void> {
                 rank: getRandomRank()
             });
 
+            await addRole(member, user, client);
+            
             count++;
         }
-
-        await addRole(member, user, client);
     }
 
     if (count > 0) {
