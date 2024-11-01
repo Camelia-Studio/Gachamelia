@@ -15,7 +15,7 @@ jobs:
       - name: Build and Push with Kaniko
         uses: aevea/action-kaniko@master
         with:
-          image: git.crystalyx.net/${{ gitea.repository }}
+          image: ${{ gitea.repository }}
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
           registry: git.crystalyx.net
