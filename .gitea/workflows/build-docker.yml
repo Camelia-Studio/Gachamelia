@@ -23,7 +23,3 @@ jobs:
           tag_with_latest: true
           cache: true
           cache_registry: git.crystalyx.net/camelia-studio/gachamelia/cache
-          extra_args: |
-            --snapshot-mode=redo
-            --use-new-run
-            --compressed-caching=false
