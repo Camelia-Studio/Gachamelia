@@ -15,14 +15,14 @@ jobs:
       - name: Build and Push with Kaniko
         uses: aevea/action-kaniko@master
         with:
-          image: ${{ gitea.repository }}
+          image: camelia-studio/gachamelia
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
           registry: git.crystalyx.net
           tag: ${{ gitea.ref_name }}
           tag_with_latest: true
           cache: true
-          cache_registry: git.crystalyx.net/${{ gitea.repository }}/cache
+          cache_registry: git.crystalyx.net/camelia-studio/Gachamelia/cache
           extra_args: |
             --snapshot-mode=redo
             --use-new-run
