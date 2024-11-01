@@ -22,7 +22,7 @@ jobs:
           tag: ${{ gitea.ref_name }}
           tag_with_latest: true
           cache: true
-          cache_registry: git.crystalyx.net/camelia-studio/Gachamelia/cache
+          cache_registry: git.crystalyx.net/camelia-studio/gachamelia/cache
           extra_args: |
             --snapshot-mode=redo
             --use-new-run
