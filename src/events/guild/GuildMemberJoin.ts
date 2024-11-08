@@ -3,8 +3,8 @@ import {CustomClient} from "../../base/classes/CustomClient";
 import {Event} from "../../base/classes/Event";
 import {User} from "../../base/models/User";
 import {getRandomRank} from "../../base/utils/RandomUtils";
-import {Rank} from "../../base/enums/Rank";
 import {addRole} from "../../base/utils/GachaUtils";
+import {Rank} from "../../base/models/Rank";
 
 export class GuildMemberJoin extends Event {
     constructor(client: CustomClient) {
@@ -26,11 +26,16 @@ export class GuildMemberJoin extends Event {
         if (!user) {
             user = await User.create({
                 discordId: member.id,
-                rank: getRandomRank()
+                rankId: (await getRandomRank()).id
+            }, {
+                include: [{
+                    model: Rank,
+                    as: 'rank'
+                }]
             });
         }
 
-        await addRole(member, user, this.client);
+        await addRole(member, user);
 
         const channel = await member.guild.channels.fetch(this.client.config.welcomeChannel);
 
@@ -39,7 +44,7 @@ export class GuildMemberJoin extends Event {
             let embed = new EmbedBuilder()
                 .setTitle(`Bienvenue sur le serveur ${member.displayName} !`)
                 .setThumbnail(member.displayAvatarURL())
-                .setDescription(`Bien joué ! Tu as obtenu le rang : ${Rank[user.rank]}`)
+                .setDescription(`Bien joué ! Tu as obtenu le rang : ${user.rank.name}`)
                 .setTimestamp(new Date())
                 .setColor('#0078DE')
             ;

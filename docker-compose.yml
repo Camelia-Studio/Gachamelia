@@ -1,15 +1,13 @@
 services:
-  mysql:
-    image: mysql:8
+  postgres:
+    image: postgres:17
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: gachamelia
-      MYSQL_USER: gachamelia
-      MYSQL_PASSWORD: gachamelia
+      POSTGRES_PASSWORD: gachamelia
+      POSTGRES_DB: gachamelia
     ports:
-      - "3310:3306"
+      - "5433:5432"
     volumes:
-      - mysql_gachamelia_data:/var/lib/mysql
+      - postgres_gachamelia_data:/var/lib/postgresql/data
 
 volumes:
-  mysql_gachamelia_data:
+  postgres_gachamelia_data:

@@ -9,6 +9,7 @@ import {Database} from "./Database";
 import {IDatabaseConfig} from "../interfaces/IDatabaseConfig";
 import {Dialect} from "sequelize";
 import {User} from "../models/User";
+import {Rank} from "../models/Rank";
 
 export class CustomClient extends Client implements ICustomClient {
     config: IConfig;
@@ -47,7 +48,20 @@ export class CustomClient extends Client implements ICustomClient {
     }
     async init(): Promise<void> {
         await this.database.connect();
+
+        Rank.initModel(this.database.getSequelize());
         User.initModel(this.database.getSequelize());
+
+
+        Rank.hasMany(User, {
+            foreignKey: 'rankId',
+            as: 'users'
+        });
+        User.belongsTo(Rank, {
+            foreignKey: 'rankId',
+            as: 'rank'
+        });
+
         await this.database.sync({
             alter: true
         });

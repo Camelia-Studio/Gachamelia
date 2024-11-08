@@ -1,33 +1,24 @@
 import {CustomClient} from "../classes/CustomClient";
 import {User} from "../models/User";
 import {getRandomRank} from "./RandomUtils";
-import {Rank} from "../enums/Rank";
 import {GuildMember} from "discord.js";
+import {Rank} from "../models/Rank";
 
-export async function addRole(member: GuildMember, user: User, client: CustomClient): Promise<void> {
+export async function addRole(member: GuildMember, user: User): Promise<void> {
     try {
-        let rRoleId = client.config.rRole;
-        let srRoleId = client.config.srRole;
-        let ssrRoleId =  client.config.ssrRole;
-
-        if (user.rank === Rank.R) {
-            const rRole = await member.guild.roles.fetch(rRoleId);
-
-            if (rRole) {
-                await member.roles.add(rRole);
+        let userRank = await Rank.findOne({
+            where: {
+                id: user.rankId
             }
-        } else if (user.rank === Rank.SR) {
-            const srRole = await member.guild.roles.fetch(srRoleId);
+        });
 
-            if (srRole) {
-                await member.roles.add(srRole);
-            }
-        } else if (user.rank === Rank.SSR) {
-            const ssrRole = await member.guild.roles.fetch(ssrRoleId);
+        if (!userRank) {
+            return;
+        }
 
-            if (ssrRole) {
-                await member.roles.add(ssrRole);
-            }
+        const discordRank = await member.guild.roles.fetch(userRank.discordId);
+        if (discordRank) {
+            await member.roles.add(userRank.discordId);
         }
     } catch (e: Error | any) {
         console.log(`Impossible d'ajouter les rôles à ${member.displayName}`);
@@ -43,16 +34,25 @@ export async function createAllUsers(client: CustomClient): Promise<void> {
         let user = await User.findOne({
             where: {
                 discordId: member.id
+            },
+            include: {
+                model: Rank,
+                as: 'rank'
             }
         })
 
         if (!user) {
             user = await User.create({
                 discordId: member.id,
-                rank: getRandomRank()
+                rankId: (await getRandomRank()).id
+            }, {
+                include: [{
+                    model: Rank,
+                    as: 'rank'
+                }]
             });
 
-            await addRole(member, user, client);
+            await addRole(member, user);
             
             count++;
         }

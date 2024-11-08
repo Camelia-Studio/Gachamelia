@@ -1,12 +1,22 @@
-import { Model, DataTypes, Sequelize } from 'sequelize';
-import { Rank } from '../enums/Rank';
+import {
+    Model,
+    DataTypes,
+    Sequelize,
+    ForeignKey,
+    NonAttribute,
+    InferAttributes, InferCreationAttributes, CreationOptional, Association
+} from 'sequelize';
+import {Rank} from "./Rank";
 
-export class User extends Model {
-    declare id: number;
+export class User extends Model<
+    InferAttributes<User>,
+    InferCreationAttributes<User>> {
+    declare id: CreationOptional<number>;
     declare discordId: string;
-    declare rank: Rank;
-    declare createdAt: Date;
-    declare updatedAt: Date;
+    declare rankId: ForeignKey<number>;
+    declare rank: NonAttribute<Rank>;
+    declare createdAt: CreationOptional<Date>;
+    declare updatedAt: CreationOptional<Date>;
 
     public static initModel(sequelize: Sequelize): void {
         User.init({
@@ -20,9 +30,13 @@ export class User extends Model {
                 allowNull: false,
                 unique: true
             },
-            rank: {
-                type: DataTypes.STRING,
-                allowNull: false
+            rankId: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                references: {
+                    model: Rank,
+                    key: 'id'
+                }
             },
             createdAt: DataTypes.DATE,
             updatedAt: DataTypes.DATE
@@ -31,4 +45,10 @@ export class User extends Model {
             tableName: 'users'
         });
     }
+
+
+
+    declare static associations: {
+        rank: Association<User, Rank>;
+    };
 }
