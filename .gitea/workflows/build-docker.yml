@@ -1,0 +1,23 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Build and Push with Kaniko
+        uses: aevea/action-kaniko@master
+        with:
+          image: camelia-studio/gachamelia
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+          registry: git.crystalyx.net
+          tag: ${{ gitea.ref_name }}
+          tag_with_latest: true

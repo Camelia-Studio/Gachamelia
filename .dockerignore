@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+.fleet/
+*.iml
+
+.git
+build/
+
+.gradle/
