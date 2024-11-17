@@ -2,6 +2,7 @@ package org.camelia.studio.gachamelia.repossitories;
 
 
 import org.camelia.studio.gachamelia.db.HibernateConfig;
+import org.camelia.studio.gachamelia.models.ByeMessage;
 import org.camelia.studio.gachamelia.models.Rank;
 import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.hibernate.Session;
@@ -71,6 +72,30 @@ public class RankRepository {
 
                 WelcomeMessage message = welcomeMessages.get(
                         ThreadLocalRandom.current().nextInt(welcomeMessages.size())
+                );
+
+                session.getTransaction().commit();
+                return message;
+            } catch (Exception e) {
+                session.getTransaction().rollback();
+                throw e;
+            }
+        }
+    }
+
+    public ByeMessage getRandomByeMessage(Rank rank) {
+        try (Session session = sessionFactory.openSession()) {
+            session.beginTransaction();
+            try {
+                Rank refreshedRank = session.get(Rank.class, rank.getId());
+                List<ByeMessage> byeMessages = refreshedRank.getByeMessages();
+
+                if (byeMessages.isEmpty()) {
+                    return null;
+                }
+
+                ByeMessage message = byeMessages.get(
+                        ThreadLocalRandom.current().nextInt(byeMessages.size())
                 );
 
                 session.getTransaction().commit();

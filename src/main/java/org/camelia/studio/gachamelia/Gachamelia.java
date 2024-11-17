@@ -1,16 +1,10 @@
 package org.camelia.studio.gachamelia;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
-import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.camelia.studio.gachamelia.db.HibernateConfig;
 import org.camelia.studio.gachamelia.listeners.ReadyListener;
 import org.camelia.studio.gachamelia.managers.ListenerManager;
-import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.repossitories.RankRepository;
-import org.camelia.studio.gachamelia.services.RankService;
-import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,11 +28,6 @@ public class Gachamelia {
 
             new ListenerManager().registerListeners(jda);
 
-
-
-            // Initialisation de la base de données
-            initDatabase();
-
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 HibernateConfig.shutdown();
                 jda.shutdown();
@@ -51,29 +40,6 @@ public class Gachamelia {
 
     public static JDA getJda() {
         return jda;
-    }
-
-    public static void initDatabase() {
-        if (!RankRepository.getInstance().findAll().isEmpty()) {
-            Guild guild = jda.getGuildById(Configuration.getInstance().getDotenv().get("GUILD_ID"));
-            if (guild != null) {
-                List<Member> members = guild.getMembers();
-
-                for (Member member : members) {
-                    User user = UserService.getInstance().getOrCreateUser(member.getId());
-
-                    if (user.getRank() == null) {
-                        user.setRank(RankService.getInstance().getRandomRank());
-                        UserService.getInstance().updateUser(user);
-                    }
-
-                    logger.info("Utilisateur {} initialisé", member.getUser().getAsTag());
-                }
-            }
-        } else {
-            logger.error("Aucun rang n'a été trouvé dans la base de données");
-            System.exit(1);
-        }
     }
 
 }

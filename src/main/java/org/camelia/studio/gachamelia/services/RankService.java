@@ -1,5 +1,6 @@
 package org.camelia.studio.gachamelia.services;
 
+import org.camelia.studio.gachamelia.models.ByeMessage;
 import org.camelia.studio.gachamelia.models.Rank;
 import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.camelia.studio.gachamelia.repossitories.RankRepository;
@@ -29,6 +30,17 @@ public class RankService {
         return rank;
     }
 
+    public Rank getOrCreateRank(String name, String discordId, int percentage, String byeTitle) {
+        Rank rank = RankRepository.getInstance().findByName(name);
+
+        if (rank == null) {
+            rank = new Rank(discordId, name, percentage, byeTitle);
+            RankRepository.getInstance().save(rank);
+        }
+
+        return rank;
+    }
+
     public List<Rank> getAllRanks() {
         return RankRepository.getInstance().findAll();
     }
@@ -52,5 +64,9 @@ public class RankService {
 
     public WelcomeMessage getRandomWelcomeMessage(Rank rank) {
         return RankRepository.getInstance().getRandomWelcomeMessage(rank);
+    }
+
+    public ByeMessage getRandomByeMessage(Rank rank) {
+        return RankRepository.getInstance().getRandomByeMessage(rank);
     }
 }

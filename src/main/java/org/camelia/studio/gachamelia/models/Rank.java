@@ -15,7 +15,7 @@ public class Rank implements IEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "discordId", nullable = false, length = 255, unique = true)
+    @Column(name = "discordId", nullable = false, unique = true)
     private String discordId;
 
     @Column(nullable = false)
@@ -30,6 +30,9 @@ public class Rank implements IEntity {
     @OneToMany(mappedBy = "rank")
     private List<WelcomeMessage> welcomeMessages;
 
+    @OneToMany(mappedBy = "rank")
+    private List<ByeMessage> byeMessages;
+
     @CreationTimestamp
     @Column(name = "createdAt")
     private LocalDateTime createdAt;
@@ -38,11 +41,21 @@ public class Rank implements IEntity {
     @Column(name = "updatedAt")
     private LocalDateTime updatedAt;
 
+    @Column(name = "byeTitle")
+    private String byeTitle;
+
 
     public Rank(String discordId, String name, int percentage) {
         this.discordId = discordId;
         this.name = name;
         this.percentage = percentage;
+    }
+
+    public Rank(String discordId, String name, int percentage, String byeTitle) {
+        this.discordId = discordId;
+        this.name = name;
+        this.percentage = percentage;
+        this.byeTitle = byeTitle;
     }
 
     public Rank() {
@@ -90,5 +103,17 @@ public class Rank implements IEntity {
 
     public List<WelcomeMessage> getWelcomeMessages() {
         return welcomeMessages;
+    }
+
+    public List<ByeMessage> getByeMessages() {
+        return byeMessages;
+    }
+
+    public String getByeTitle() {
+        return byeTitle;
+    }
+
+    public void setByeTitle(String byeTitle) {
+        this.byeTitle = byeTitle;
     }
 }

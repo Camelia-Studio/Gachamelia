@@ -3,6 +3,7 @@ package org.camelia.studio.gachamelia.managers;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.camelia.studio.gachamelia.listeners.GuildMemberJoinListener;
+import org.camelia.studio.gachamelia.listeners.GuildMemberLeaveListener;
 import org.camelia.studio.gachamelia.listeners.SlashCommandListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +19,7 @@ public class ListenerManager {
 
         addListener(new SlashCommandListener());
         addListener(new GuildMemberJoinListener());
+        addListener(new GuildMemberLeaveListener());
     }
     public void registerListeners(JDA jda) {
         for (ListenerAdapter listenerAdapter : listener) {
