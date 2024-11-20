@@ -28,6 +28,19 @@ public class User implements IEntity {
     @Column(name = "updatedAt")
     private LocalDateTime updatedAt;
 
+    @ManyToOne(fetch = FetchType.EAGER)
+    private Element element;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    private Role role;
+
+    public Element getElement() {
+        return element;
+    }
+
+    public Role getRole() {
+        return role;
+    }
 
     public User() {
     }
