@@ -1,5 +1,6 @@
 package org.camelia.studio.gachamelia.listeners;
 
+import jakarta.annotation.Nonnull;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
@@ -11,8 +12,8 @@ import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
+
 import java.awt.*;
-import jakarta.annotation.Nonnull;
 
 
 public class GuildMemberJoinListener extends ListenerAdapter {
@@ -24,7 +25,6 @@ public class GuildMemberJoinListener extends ListenerAdapter {
         WelcomeMessage welcomeMessage = RankService.getInstance().getRandomWelcomeMessage(user.getRank());
 
         TextChannel channel = event.getGuild().getTextChannelById(Configuration.getInstance().getDotenv().get("WELCOME_CHANNEL", "0"));
-
 
         Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
         Color color = new Color(0, 0, 0);
@@ -44,8 +44,8 @@ public class GuildMemberJoinListener extends ListenerAdapter {
 
         description.append("\n\n")
                 .append("__Caractéristiques principales__ :\n")
-                .append("• Rôle « ").append("N/A").append(" ».").append("\n")
-                .append("• Élément « ").append("N/A").append(" ».").append("\n")
+                .append("• Rôle « ").append(user.getRole().getName()).append(" ».").append("\n")
+                .append("• Élément « ").append(user.getElement().getName()).append(" ».").append("\n")
         ;
 
         EmbedBuilder embedBuilder = new EmbedBuilder()

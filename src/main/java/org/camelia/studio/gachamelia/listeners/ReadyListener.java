@@ -1,14 +1,18 @@
 package org.camelia.studio.gachamelia.listeners;
 
+import jakarta.annotation.Nonnull;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import jakarta.annotation.Nonnull;
 import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.repossitories.RankRepository;
+import org.camelia.studio.gachamelia.repositories.ElementRepository;
+import org.camelia.studio.gachamelia.repositories.RankRepository;
+import org.camelia.studio.gachamelia.repositories.RoleRepository;
+import org.camelia.studio.gachamelia.services.ElementService;
 import org.camelia.studio.gachamelia.services.RankService;
+import org.camelia.studio.gachamelia.services.RoleService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.slf4j.Logger;
@@ -25,7 +29,7 @@ public class ReadyListener extends ListenerAdapter {
     }
 
     private void initDatabase(JDA jda) {
-        if (!RankRepository.getInstance().findAll().isEmpty()) {
+        if (!RankRepository.getInstance().findAll().isEmpty() || !RoleRepository.getInstance().findAll().isEmpty() || !ElementRepository.getInstance().findAll().isEmpty()) {
             Guild guild = jda.getGuildById(Configuration.getInstance().getDotenv().get("GUILD_ID"));
             if (guild != null) {
                 guild.loadMembers().onSuccess(members -> {
@@ -37,12 +41,22 @@ public class ReadyListener extends ListenerAdapter {
                             UserService.getInstance().updateUser(user);
                         }
 
+                        if (user.getRole() == null) {
+                            user.setRole(RoleService.getInstance().getRandomRole());
+                            UserService.getInstance().updateUser(user);
+                        }
+
+                        if (user.getElement() == null) {
+                            user.setElement(ElementService.getInstance().getRandomElement());
+                            UserService.getInstance().updateUser(user);
+                        }
+
                         logger.info("Utilisateur {} initialisé", member.getUser().getAsTag());
                     }
                 });
             }
         } else {
-            logger.error("Aucun rang n'a été trouvé dans la base de données");
+            logger.error("Aucun rang ou rôle n'a été trouvé dans la base de données");
             System.exit(1);
         }
     }

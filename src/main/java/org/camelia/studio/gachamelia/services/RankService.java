@@ -3,7 +3,7 @@ package org.camelia.studio.gachamelia.services;
 import org.camelia.studio.gachamelia.models.ByeMessage;
 import org.camelia.studio.gachamelia.models.Rank;
 import org.camelia.studio.gachamelia.models.WelcomeMessage;
-import org.camelia.studio.gachamelia.repossitories.RankRepository;
+import org.camelia.studio.gachamelia.repositories.RankRepository;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;

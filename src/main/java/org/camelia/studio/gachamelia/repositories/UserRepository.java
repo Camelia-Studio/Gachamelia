@@ -1,4 +1,4 @@
-package org.camelia.studio.gachamelia.repossitories;
+package org.camelia.studio.gachamelia.repositories;
 
 
 import org.camelia.studio.gachamelia.db.HibernateConfig;

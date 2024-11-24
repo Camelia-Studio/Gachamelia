@@ -2,6 +2,7 @@ package org.camelia.studio.gachamelia.models;
 
 import jakarta.persistence.*;
 import org.camelia.studio.gachamelia.interfaces.IEntity;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.util.List;
 
@@ -18,8 +19,20 @@ public class Role implements IEntity {
     @Column(nullable = false)
     private int percentage;
 
+    @Column(nullable = false, name = "image_url")
+    @ColumnDefault(value = "'https://placehold.co/400'")
+    private String imageUrl;
+
     @OneToMany(mappedBy = "role")
     private List<User> users;
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
 
     public List<User> getUsers() {
         return users;

@@ -42,6 +42,14 @@ public class User implements IEntity {
         return role;
     }
 
+    public void setRole(Role role) {
+        this.role = role;
+    }
+
+    public void setElement(Element element) {
+        this.element = element;
+    }
+
     public User() {
     }
 
