@@ -2,8 +2,8 @@ package org.camelia.studio.gachamelia.listeners;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import javax.annotation.Nonnull;
 import org.camelia.studio.gachamelia.managers.CommandManager;
-import org.jetbrains.annotations.NotNull;
 
 public class SlashCommandListener extends ListenerAdapter {
     private final CommandManager commandManager;
@@ -15,7 +15,7 @@ public class SlashCommandListener extends ListenerAdapter {
 
 
     @Override
-    public void onSlashCommandInteraction(@NotNull SlashCommandInteractionEvent event) {
+    public void onSlashCommandInteraction(@Nonnull SlashCommandInteractionEvent event) {
         event.deferReply().setEphemeral(true).queue();
         commandManager.handleCommand(event.getName(), event);
     }

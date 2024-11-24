@@ -11,13 +11,13 @@ import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
-
 import java.awt.*;
+import javax.annotation.Nonnull;
 
 
 public class GuildMemberJoinListener extends ListenerAdapter {
     @Override
-    public void onGuildMemberJoin(GuildMemberJoinEvent event) {
+    public void onGuildMemberJoin(@Nonnull GuildMemberJoinEvent event) {
         Member member = event.getMember();
         User user = UserService.getInstance().getOrCreateUser(member.getId());
 

@@ -10,15 +10,15 @@ import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
-
 import java.awt.*;
 import java.time.Instant;
+import javax.annotation.Nonnull;
 
 
 public class GuildMemberLeaveListener extends ListenerAdapter {
 
     @Override
-    public void onGuildMemberRemove(GuildMemberRemoveEvent event) {
+    public void onGuildMemberRemove(@Nonnull GuildMemberRemoveEvent event) {
 
         net.dv8tion.jda.api.entities.User discordUser = event.getUser();
         User user = UserService.getInstance().getOrCreateUser(discordUser.getId());
@@ -37,7 +37,7 @@ public class GuildMemberLeaveListener extends ListenerAdapter {
 
 
         StringBuilder description = new StringBuilder();
-        description.append(byeMessage.getMessage().replaceAll("%username%", "**" + discordUser.getEffectiveName() + "**"));
+        description.append(byeMessage.getMessage().replace("%username%", "**" + discordUser.getEffectiveName() + "**"));
 
         EmbedBuilder embedBuilder = new EmbedBuilder()
                 .setTitle(user.getRank().getByeTitle() != null ? user.getRank().getByeTitle() : "Au revoir, %s !".formatted(discordUser.getEffectiveName()))

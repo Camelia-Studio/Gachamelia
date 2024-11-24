@@ -9,8 +9,6 @@ import org.camelia.studio.gachamelia.utils.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
-
 public class Gachamelia {
     private static JDA jda;
     private static final Logger logger = LoggerFactory.getLogger(Gachamelia.class);
@@ -32,6 +30,10 @@ public class Gachamelia {
                 HibernateConfig.shutdown();
                 jda.shutdown();
             }));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.error("Le thread a été interrompu : {}", e.getMessage());
+            System.exit(1);
         } catch (Exception e) {
             logger.error("Une erreur est survenue lors de l'exécution du bot : {}", e.getMessage());
             System.exit(1);
