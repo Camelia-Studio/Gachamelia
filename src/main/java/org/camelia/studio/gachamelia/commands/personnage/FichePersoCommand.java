@@ -41,6 +41,12 @@ public class FichePersoCommand implements ISlashCommand {
             event.getHook().editOriginal("L'utilisateur n'a pas été trouvé").queue();
             return;
         }
+
+        if (event.getGuild() == null) {
+            event.getHook().editOriginal("Le serveur n'a pas été trouvé").queue();
+            return;
+        }
+
         EmbedBuilder embedGeneralite = new EmbedBuilder();
         User user = UserService.getInstance().getOrCreateUser(member.getId());
         Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
@@ -49,6 +55,7 @@ public class FichePersoCommand implements ISlashCommand {
         embedGeneralite.setAuthor(member.getEffectiveName(), null, user.getRole().getImageUrl());
         embedGeneralite.setTitle("Fiche de personnage");
         embedGeneralite.setColor(color);
+        embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());
         embedGeneralite.setDescription("""
                 __Caractéristiques principales__ :
                 - Nom : **%s**
