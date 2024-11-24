@@ -1,5 +1,6 @@
 package org.camelia.studio.gachamelia.listeners;
 
+import jakarta.annotation.Nonnull;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
@@ -12,7 +13,6 @@ import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import java.awt.*;
 import java.time.Instant;
-import javax.annotation.Nonnull;
 
 
 public class GuildMemberLeaveListener extends ListenerAdapter {

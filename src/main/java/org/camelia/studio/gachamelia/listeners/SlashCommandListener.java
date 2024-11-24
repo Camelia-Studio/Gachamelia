@@ -2,7 +2,7 @@ package org.camelia.studio.gachamelia.listeners;
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 import org.camelia.studio.gachamelia.managers.CommandManager;
 
 public class SlashCommandListener extends ListenerAdapter {

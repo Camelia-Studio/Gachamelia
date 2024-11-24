@@ -5,7 +5,7 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.repossitories.RankRepository;
 import org.camelia.studio.gachamelia.services.RankService;

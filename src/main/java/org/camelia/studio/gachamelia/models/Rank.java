@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -43,6 +44,14 @@ public class Rank implements IEntity {
 
     @Column(name = "byeTitle")
     private String byeTitle;
+
+    @OneToMany(mappedBy = "id.rank", fetch = FetchType.LAZY)
+    private final List<RankStat> rankStats = new ArrayList<>();
+
+    public List<RankStat> getRankStats() {
+        return rankStats;
+    }
+
 
 
     public Rank(String discordId, String name, int percentage) {

@@ -12,7 +12,7 @@ import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import java.awt.*;
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 
 
 public class GuildMemberJoinListener extends ListenerAdapter {
