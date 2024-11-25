@@ -9,6 +9,8 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
 import org.camelia.studio.gachamelia.models.User;
+import org.camelia.studio.gachamelia.models.UserStat;
+import org.camelia.studio.gachamelia.repositories.StatRepository;
 import org.camelia.studio.gachamelia.services.UserService;
 
 import java.awt.*;
@@ -51,12 +53,9 @@ public class FichePersoCommand implements ISlashCommand {
         User user = UserService.getInstance().getOrCreateUser(member.getId());
         Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
         Color color = role != null ? role.getColor() : Color.WHITE;
+        List<UserStat> stats = StatRepository.getInstance().getUserStats(user);
 
-        embedGeneralite.setAuthor(member.getEffectiveName(), null, user.getRole().getImageUrl());
-        embedGeneralite.setTitle("Fiche de personnage");
-        embedGeneralite.setColor(color);
-        embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());
-        embedGeneralite.setDescription("""
+        StringBuilder description = new StringBuilder("""
                 __Caractéristiques principales__ :
                 - Nom : **%s**
                 - Rareté : **%s**
@@ -65,26 +64,26 @@ public class FichePersoCommand implements ISlashCommand {
                 - Xp : **%d**
                 - Emblème : **%s**
                 __Statistiques de combat__ :
-                - Éther : **%d** (%d + 0)
-                - Astral : **%d** (%d + 0)
-                - Impact : **%d** (%d + 0)
-                - Aura : **%d** (%d + 0)
-                - Égide : **%d** (%d + 0)
-                - Oracle : **%d** (%d + 0)
                 """.formatted(
                 member.getEffectiveName(),
                 user.getRank().getName(),
                 user.getRole().getName(),
                 String.join(", ", user.getElement().getName()),
                 0,
-                "Ø",
-                0, 0,
-                0, 0,
-                0, 0,
-                0, 0,
-                0, 0,
-                0, 0
+                "Ø"
         ));
+
+        for (UserStat stat : stats) {
+            int userStat = stat.getValue();
+            int equipmentStat = 0;
+            description.append("- %s : **%d** (%d + %d)\n".formatted(stat.getStat().getName(), userStat + equipmentStat, userStat, equipmentStat));
+        }
+
+        embedGeneralite.setAuthor(member.getEffectiveName(), null, user.getRole().getImageUrl());
+        embedGeneralite.setTitle("Fiche de personnage");
+        embedGeneralite.setColor(color);
+        embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());
+        embedGeneralite.setDescription(description.toString());
 
         event.getChannel().sendMessageEmbeds(List.of(
                 embedGeneralite.build()

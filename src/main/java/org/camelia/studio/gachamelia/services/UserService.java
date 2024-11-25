@@ -1,9 +1,7 @@
 package org.camelia.studio.gachamelia.services;
 
-import org.camelia.studio.gachamelia.models.Element;
-import org.camelia.studio.gachamelia.models.Rank;
-import org.camelia.studio.gachamelia.models.Role;
-import org.camelia.studio.gachamelia.models.User;
+import org.camelia.studio.gachamelia.models.*;
+import org.camelia.studio.gachamelia.repositories.StatRepository;
 import org.camelia.studio.gachamelia.repositories.UserRepository;
 
 import java.util.List;
@@ -31,6 +29,15 @@ public class UserService {
 
             Element element = ElementService.getInstance().getRandomElement();
             user.setElement(element);
+
+            List<Stat> stats = StatRepository.getInstance().findAll();
+            for (Stat stat : stats) {
+                UserStat userStat = new UserStat();
+                userStat.setUser(user);
+                userStat.setStat(stat);
+                userStat.setValue(0);
+                StatRepository.getInstance().saveUserStat(userStat);
+            }
 
             UserRepository.getInstance().save(user);
         }
