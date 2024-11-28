@@ -6,6 +6,8 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -28,14 +30,19 @@ public class User implements IEntity {
     @Column(name = "updatedAt")
     private LocalDateTime updatedAt;
 
-    @ManyToOne(fetch = FetchType.EAGER)
-    private Element element;
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+            name = "users_elements",
+            joinColumns = @JoinColumn(name = "user_id"),
+            inverseJoinColumns = @JoinColumn(name = "element_id")
+    )
+    private final Set<Element> elements = new HashSet<>();
 
     @ManyToOne(fetch = FetchType.EAGER)
     private Role role;
 
-    public Element getElement() {
-        return element;
+    public Set<Element> getElements() {
+        return elements;
     }
 
     public Role getRole() {
@@ -46,8 +53,8 @@ public class User implements IEntity {
         this.role = role;
     }
 
-    public void setElement(Element element) {
-        this.element = element;
+    public void addElement(Element elements) {
+        this.elements.add(elements);
     }
 
     public User() {

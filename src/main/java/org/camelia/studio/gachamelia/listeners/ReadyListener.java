@@ -67,8 +67,8 @@ public class ReadyListener extends ListenerAdapter {
                             UserService.getInstance().updateUser(user);
                         }
 
-                        if (user.getElement() == null) {
-                            user.setElement(ElementService.getInstance().getRandomElement());
+                        if (user.getElements().isEmpty()) {
+                            user.addElement(ElementService.getInstance().getRandomElement());
                             UserService.getInstance().updateUser(user);
                         }
 

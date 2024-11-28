@@ -28,7 +28,8 @@ public class UserService {
             user.setRole(role);
 
             Element element = ElementService.getInstance().getRandomElement();
-            user.setElement(element);
+            user.addElement(element);
+            UserRepository.getInstance().save(user);
 
             List<Stat> stats = StatRepository.getInstance().findAll();
             for (Stat stat : stats) {
@@ -38,8 +39,6 @@ public class UserService {
                 userStat.setValue(0);
                 StatRepository.getInstance().saveUserStat(userStat);
             }
-
-            UserRepository.getInstance().save(user);
         }
 
         return user;

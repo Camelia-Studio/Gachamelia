@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
+import org.camelia.studio.gachamelia.models.Element;
 import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.models.UserStat;
 import org.camelia.studio.gachamelia.repositories.StatRepository;
@@ -69,7 +70,7 @@ public class FichePersoCommand implements ISlashCommand {
                 member.getEffectiveName(),
                 user.getRank().getName(),
                 user.getRole().getName(),
-                String.join(", ", user.getElement().getName()),
+                user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2),
                 0,
                 "Ø"
         ));

@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import org.camelia.studio.gachamelia.models.Element;
 import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.camelia.studio.gachamelia.services.RankService;
@@ -46,7 +47,7 @@ public class GuildMemberJoinListener extends ListenerAdapter {
         description.append("\n\n")
                 .append("__Caractéristiques principales__ :\n")
                 .append("• Rôle « ").append(user.getRole().getName()).append(" ».").append("\n")
-                .append("• Élément « ").append(user.getElement().getName()).append(" ».").append("\n")
+                .append("• Élément « ").append(user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2)).append(" ».").append("\n")
         ;
 
         EmbedBuilder embedBuilder = EmbedUtils.createDefaultEmbed(event.getJDA())

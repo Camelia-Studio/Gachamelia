@@ -3,7 +3,8 @@ package org.camelia.studio.gachamelia.models;
 import jakarta.persistence.*;
 import org.camelia.studio.gachamelia.interfaces.IEntity;
 
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "elements")
@@ -15,8 +16,13 @@ public class Element implements IEntity {
     @Column(nullable = false)
     private String name;
 
-    @OneToMany(mappedBy = "element")
-    private List<User> users;
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+            name = "users_elements",
+            joinColumns = @JoinColumn(name = "element_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private final Set<User> users = new HashSet<>();
 
     public Long getId() {
         return id;
@@ -30,7 +36,7 @@ public class Element implements IEntity {
         this.name = name;
     }
 
-    public List<User> getUsers() {
+    public Set<User> getUsers() {
         return users;
     }
 
