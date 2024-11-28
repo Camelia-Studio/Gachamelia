@@ -22,7 +22,7 @@ public class HibernateConfig {
         if (sessionFactory == null) {
             try {
                 logger.info("Initializing Hibernate SessionFactory");
-                Dotenv dotenv = Dotenv.load();
+                Dotenv dotenv = org.camelia.studio.gachamelia.utils.Configuration.getInstance().getDotenv();
 
                 Properties props = new Properties();
 
