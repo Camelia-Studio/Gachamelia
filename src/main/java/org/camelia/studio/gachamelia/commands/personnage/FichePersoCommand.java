@@ -13,6 +13,7 @@ import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.models.UserStat;
 import org.camelia.studio.gachamelia.repositories.StatRepository;
 import org.camelia.studio.gachamelia.services.UserService;
+import org.camelia.studio.gachamelia.utils.Configuration;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
@@ -63,7 +64,7 @@ public class FichePersoCommand implements ISlashCommand {
                 - Rareté : **%s**
                 - Rôle : **%s**
                 - Éléments : *%s*
-                - Xp : **%d**
+                - %s : **%d**
                 - Emblème : **%s**
                 __Statistiques de combat__ :
                 """.formatted(
@@ -71,6 +72,7 @@ public class FichePersoCommand implements ISlashCommand {
                 user.getRank().getName(),
                 user.getRole().getName(),
                 user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2),
+                Configuration.getInstance().getDotenv().get("XP_EMOJI", "XP"),
                 0,
                 "Ø"
         ));
