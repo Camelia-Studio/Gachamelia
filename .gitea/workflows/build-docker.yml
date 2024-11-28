@@ -16,8 +16,8 @@ jobs:
         uses: aevea/action-kaniko@master
         with:
           image: camelia-studio/gachamelia
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-          registry: git.crystalyx.net
+          username: camelia
+          password: camelia
+          registry: ${{ secrets.REGISTRY_SERVER }}
           tag: ${{ gitea.ref_name }}
           tag_with_latest: true
