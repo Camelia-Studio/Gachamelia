@@ -4,41 +4,36 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.lang.reflect.Modifier;
+import java.io.IOException;
 import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 public class ReflectionUtils {
     private static final Logger logger = LoggerFactory.getLogger(ReflectionUtils.class);
 
-    /**
-     * Charge toutes les classes d'un type spécifique depuis un package
-     *
-     * @param packageName Le package à scanner
-     * @param targetType Le type de classe à charger
-     * @return Liste des instances des classes trouvées
-     */
     public static <T> List<T> loadClasses(String packageName, Class<T> targetType) {
         List<T> instances = new ArrayList<>();
+        String path = packageName.replace('.', '/');
 
         try {
-            // Convertit le nom du package en chemin
-            String path = packageName.replace('.', '/');
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            Enumeration<URL> resources = classLoader.getResources(path);
 
-            // Récupère toutes les ressources du package
-            var resources = classLoader.getResources(path);
-
-            // Parcourt toutes les ressources trouvées
             while (resources.hasMoreElements()) {
                 URL resource = resources.nextElement();
-                File directory = new File(resource.toURI());
 
-                // Charge les classes du répertoire et ses sous-répertoires
-                scanDirectory(directory, packageName, targetType, instances);
+                if (resource.getProtocol().equals("jar")) {
+                    processJarFile(resource, path, packageName, targetType, instances);
+                } else {
+                    processDirectory(new File(resource.toURI()), packageName, targetType, instances);
+                }
             }
-
         } catch (Exception e) {
             logger.error("Erreur lors du scan du package {} : {}", packageName, e.getMessage());
         }
@@ -46,60 +41,61 @@ public class ReflectionUtils {
         return instances;
     }
 
-    /**
-     * Scanne récursivement un répertoire pour trouver les classes
-     */
-    private static <T> void scanDirectory(File directory, String packageName, Class<T> targetType, List<T> instances) {
-        // Vérifie si le répertoire existe
-        if (!directory.exists()) {
-            return;
-        }
+    private static <T> void processJarFile(URL resource, String path, String packageName,
+                                           Class<T> targetType, List<T> instances) throws IOException {
+        String jarPath = resource.getPath().substring(5, resource.getPath().indexOf("!"));
+        jarPath = URLDecoder.decode(jarPath, StandardCharsets.UTF_8);
 
-        // Récupère tous les fichiers du répertoire
-        File[] files = directory.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                // Si c'est un répertoire, on le scanne récursivement
-                if (file.isDirectory()) {
-                    scanDirectory(
-                            file,
-                            packageName + "." + file.getName(),
-                            targetType,
-                            instances
-                    );
-                }
-                // Si c'est un fichier .class, on essaie de le charger
-                else if (file.getName().endsWith(".class")) {
-                    loadClass(packageName, file.getName(), targetType, instances);
+        try (JarFile jar = new JarFile(jarPath)) {
+            Enumeration<JarEntry> entries = jar.entries();
+
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                String entryName = entry.getName();
+
+                if (entryName.startsWith(path) && entryName.endsWith(".class")) {
+                    String className = entryName.substring(0, entryName.length() - 6)
+                            .replace('/', '.');
+                    loadClass(className, targetType, instances);
                 }
             }
         }
     }
 
-    /**
-     * Charge une classe spécifique
-     */
+    private static <T> void processDirectory(File directory, String packageName,
+                                             Class<T> targetType, List<T> instances) {
+        if (!directory.exists()) {
+            return;
+        }
+
+        File[] files = directory.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    processDirectory(file, packageName + "." + file.getName(),
+                            targetType, instances);
+                } else if (file.getName().endsWith(".class")) {
+                    String className = packageName + '.' +
+                            file.getName().substring(0, file.getName().length() - 6);
+                    loadClass(className, targetType, instances);
+                }
+            }
+        }
+    }
+
     @SuppressWarnings("unchecked")
-    private static <T> void loadClass(String packageName, String fileName, Class<T> targetType, List<T> instances) {
+    private static <T> void loadClass(String className, Class<T> targetType, List<T> instances) {
         try {
-            // Convertit le nom de fichier en nom de classe
-            String className = packageName + '.' + fileName.substring(0, fileName.length() - 6);
             Class<?> clazz = Class.forName(className);
 
-            // Vérifie si la classe correspond au type recherché
-            if (targetType.isAssignableFrom(clazz) &&
-                    !clazz.isInterface() &&
-                    !Modifier.isAbstract(clazz.getModifiers())) {
-
-                // Crée une instance de la classe
-                T instance = (T) clazz.getDeclaredConstructor().newInstance();
-                instances.add(instance);
-
+            if (targetType.isAssignableFrom(clazz) && !clazz.isInterface() &&
+                    !java.lang.reflect.Modifier.isAbstract(clazz.getModifiers())) {
+                instances.add((T) clazz.getDeclaredConstructor().newInstance());
                 logger.debug("Classe chargée : {}", className);
             }
-
         } catch (Exception e) {
-            logger.error("Erreur lors du chargement d'une classe : {}", e.getMessage());
+            logger.error("Erreur lors du chargement de la classe {} : {}",
+                    className, e.getMessage());
         }
     }
 }
