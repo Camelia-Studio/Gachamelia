@@ -11,8 +11,9 @@ import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
+import org.camelia.studio.gachamelia.utils.EmbedUtils;
+
 import java.awt.*;
-import java.time.Instant;
 
 
 public class GuildMemberLeaveListener extends ListenerAdapter {
@@ -39,17 +40,10 @@ public class GuildMemberLeaveListener extends ListenerAdapter {
         StringBuilder description = new StringBuilder();
         description.append(byeMessage.getMessage().replace("%username%", "**" + discordUser.getEffectiveName() + "**"));
 
-        EmbedBuilder embedBuilder = new EmbedBuilder()
+        EmbedBuilder embedBuilder = EmbedUtils.createDefaultEmbed(event.getJDA())
                 .setTitle(user.getRank().getByeTitle() != null ? user.getRank().getByeTitle() : "Au revoir, %s !".formatted(discordUser.getEffectiveName()))
                 .setDescription(description)
                 .setThumbnail(discordUser.getEffectiveAvatarUrl())
-                .setTimestamp(Instant.now())
-                .setFooter(
-                        "Gachamélia v%s « %s »".formatted(
-                                Configuration.getInstance().getDotenv().get("APP_VERSION", "0.0.1"),
-                                Configuration.getInstance().getDotenv().get("APP_DESCRIPTION", "J'ai posé un pied à terre.")
-                        ),
-                        event.getJDA().getSelfUser().getAvatarUrl())
                 .setColor(color);
 
 

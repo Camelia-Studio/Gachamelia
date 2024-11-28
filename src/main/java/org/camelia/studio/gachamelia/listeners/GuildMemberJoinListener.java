@@ -12,6 +12,7 @@ import org.camelia.studio.gachamelia.models.WelcomeMessage;
 import org.camelia.studio.gachamelia.services.RankService;
 import org.camelia.studio.gachamelia.services.UserService;
 import org.camelia.studio.gachamelia.utils.Configuration;
+import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
 
@@ -48,17 +49,11 @@ public class GuildMemberJoinListener extends ListenerAdapter {
                 .append("• Élément « ").append(user.getElement().getName()).append(" ».").append("\n")
         ;
 
-        EmbedBuilder embedBuilder = new EmbedBuilder()
+        EmbedBuilder embedBuilder = EmbedUtils.createDefaultEmbed(event.getJDA())
                 .setTitle(event.getMember().getEffectiveName() + " vient d'être invoqué !")
                 .setDescription(description)
                 .setThumbnail(member.getUser().getEffectiveAvatarUrl())
                 .setTimestamp(event.getMember().getTimeJoined())
-                .setFooter(
-                        "Gachamélia v%s « %s »".formatted(
-                                Configuration.getInstance().getDotenv().get("APP_VERSION", "0.0.1"),
-                                Configuration.getInstance().getDotenv().get("APP_DESCRIPTION", "J'ai posé un pied à terre.")
-                        ),
-                        event.getJDA().getSelfUser().getAvatarUrl())
                 .setColor(color);
 
 

@@ -106,4 +106,11 @@ public class RankRepository {
             }
         }
     }
+
+    public Rank getRankStaff() {
+        try (Session session = sessionFactory.openSession()) {
+            return session.createQuery("FROM Rank WHERE staff = true", Rank.class)
+                    .uniqueResult();
+        }
+    }
 }

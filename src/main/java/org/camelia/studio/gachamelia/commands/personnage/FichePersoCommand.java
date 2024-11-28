@@ -12,6 +12,7 @@ import org.camelia.studio.gachamelia.models.User;
 import org.camelia.studio.gachamelia.models.UserStat;
 import org.camelia.studio.gachamelia.repositories.StatRepository;
 import org.camelia.studio.gachamelia.services.UserService;
+import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
 import java.util.List;
@@ -49,7 +50,7 @@ public class FichePersoCommand implements ISlashCommand {
             return;
         }
 
-        EmbedBuilder embedGeneralite = new EmbedBuilder();
+        EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
         User user = UserService.getInstance().getOrCreateUser(member.getId());
         Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
         Color color = role != null ? role.getColor() : Color.WHITE;

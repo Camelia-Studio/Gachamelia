@@ -2,6 +2,7 @@ package org.camelia.studio.gachamelia.models;
 
 import jakarta.persistence.*;
 import org.camelia.studio.gachamelia.interfaces.IEntity;
+import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -45,6 +46,10 @@ public class Rank implements IEntity {
     @Column(name = "byeTitle")
     private String byeTitle;
 
+    @Column(name = "is_staff", nullable = false)
+    @ColumnDefault("false")
+    private boolean staff;
+
     @OneToMany(mappedBy = "id.rank", fetch = FetchType.LAZY)
     private final List<RankStat> rankStats = new ArrayList<>();
 
@@ -52,7 +57,13 @@ public class Rank implements IEntity {
         return rankStats;
     }
 
+    public boolean isStaff() {
+        return this.staff;
+    }
 
+    public void setStaff(boolean staff) {
+        this.staff = staff;
+    }
 
     public Rank(String discordId, String name, int percentage) {
         this.discordId = discordId;
