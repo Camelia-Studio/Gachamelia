@@ -63,7 +63,7 @@ public class RankRepository {
             session.beginTransaction();
             try {
                 // Recharger le rank avec ses messages
-                Rank refreshedRank = session.get(Rank.class, rank.getId());
+                Rank refreshedRank = session.find(Rank.class, rank.getId());
                 List<WelcomeMessage> welcomeMessages = refreshedRank.getWelcomeMessages();
 
                 if (welcomeMessages.isEmpty()) {
@@ -87,7 +87,7 @@ public class RankRepository {
         try (Session session = sessionFactory.openSession()) {
             session.beginTransaction();
             try {
-                Rank refreshedRank = session.get(Rank.class, rank.getId());
+                Rank refreshedRank = session.find(Rank.class, rank.getId());
                 List<ByeMessage> byeMessages = refreshedRank.getByeMessages();
 
                 if (byeMessages.isEmpty()) {
