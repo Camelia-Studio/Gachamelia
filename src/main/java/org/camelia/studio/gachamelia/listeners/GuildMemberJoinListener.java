@@ -33,7 +33,10 @@ public class GuildMemberJoinListener extends ListenerAdapter {
 
         if (role != null) {
             event.getGuild().addRoleToMember(member, role).queue();
-            color = role.getColor();
+            Color roleColor = role.getColors().getPrimary();
+            if (roleColor != null) {
+                color = roleColor;
+            }
         }
 
 

@@ -33,7 +33,10 @@ public class GuildMemberLeaveListener extends ListenerAdapter {
         Color color = new Color(0, 0, 0);
 
         if (role != null) {
-            color = role.getColor();
+            Color roleColor = role.getColors().getPrimary();
+            if (roleColor != null) {
+                color = roleColor;
+            }
         }
 
 

@@ -55,7 +55,7 @@ public class FichePersoCommand implements ISlashCommand {
         EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
         User user = UserService.getInstance().getOrCreateUser(member.getId());
         Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
-        Color color = role != null ? role.getColor() : Color.WHITE;
+        Color color = role != null && role.getColors().getPrimary() != null ? role.getColors().getPrimary() : Color.WHITE;
         List<UserStat> stats = StatRepository.getInstance().getUserStats(user);
 
         StringBuilder description = new StringBuilder("""
