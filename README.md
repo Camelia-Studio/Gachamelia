@@ -6,6 +6,20 @@ Transforme ton serveur Discord en *gacha* géant !
 
 **Gachamélia** est un bot Discord qui va transformer ton serveur en un véritable *gacha* ! Cet outil est développé par la branche **CILA** de l'association **Camélia Studio**.
 
+## Configuration
+
+Le bot utilise l'API du backoffice comme source de vérité.
+
+Variables requises :
+
+- `BOT_TOKEN`
+- `API_BASE_URL`
+- `API_CLIENT_ID`
+- `API_CLIENT_SECRET`
+- `XP_EMOJI`
+- `APP_VERSION`
+- `APP_DESCRIPTION`
+
 
 Liens utiles :
 

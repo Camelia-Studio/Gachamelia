@@ -3,6 +3,7 @@ package org.camelia.studio.gachamelia;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.requests.GatewayIntent;
+import org.camelia.studio.gachamelia.api.ApiException;
 import org.camelia.studio.gachamelia.api.ApiConfiguration;
 import org.camelia.studio.gachamelia.api.ApiTokenProvider;
 import org.camelia.studio.gachamelia.api.BotApiService;
@@ -27,8 +28,8 @@ import java.time.Duration;
 import java.util.random.RandomGenerator;
 
 public class Gachamelia {
-    private static JDA jda;
     private static final Logger logger = LoggerFactory.getLogger(Gachamelia.class);
+    private static JDA jda;
 
     public static void main(String[] args) {
         try {
@@ -59,19 +60,27 @@ public class Gachamelia {
                     emojiRefreshDebouncer
             ).registerListeners(jda);
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                emojiRefreshDebouncer.close();
-                botEmojiScheduler.close();
-                jda.shutdown();
-            }));
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda)));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logger.error("Le thread a été interrompu : {}", e.getMessage());
+            System.exit(1);
+        } catch (IllegalArgumentException exception) {
+            logger.error("Configuration invalide : {}", exception.getMessage());
+            System.exit(1);
+        } catch (ApiException exception) {
+            logger.error("Erreur API au démarrage : {} ({})", exception.errorCode(), exception.statusCode());
             System.exit(1);
         } catch (Exception e) {
             logger.error("Une erreur est survenue lors de l'exécution du bot : {}", e.getMessage());
             System.exit(1);
         }
+    }
+
+    static void shutdown(BotEmojiScheduler botEmojiScheduler, GuildEmojiRefreshDebouncer emojiRefreshDebouncer, JDA jda) {
+        botEmojiScheduler.close();
+        emojiRefreshDebouncer.close();
+        jda.shutdown();
     }
 
     public static JDA getJda() {
