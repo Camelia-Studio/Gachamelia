@@ -45,16 +45,6 @@ public class GuildMemberJoinListener extends ListenerAdapter {
             }
 
             CatalogueEnvelope catalogue = catalogueCache.require(event.getGuild().getId());
-            String welcomeChannelId = catalogue.server().settings() != null ? catalogue.server().settings().welcomeChannelId() : null;
-            if (welcomeChannelId == null || welcomeChannelId.isBlank()) {
-                return;
-            }
-
-            TextChannel channel = event.getGuild().getTextChannelById(welcomeChannelId);
-            if (channel == null) {
-                return;
-            }
-
             Role role = event.getGuild().getRoleById(envelope.user().rank().discordId());
             Color color = new Color(0, 0, 0);
 
@@ -64,6 +54,16 @@ public class GuildMemberJoinListener extends ListenerAdapter {
                 if (roleColor != null) {
                     color = roleColor;
                 }
+            }
+
+            String welcomeChannelId = catalogue.server().settings() != null ? catalogue.server().settings().welcomeChannelId() : null;
+            if (welcomeChannelId == null || welcomeChannelId.isBlank()) {
+                return;
+            }
+
+            TextChannel channel = event.getGuild().getTextChannelById(welcomeChannelId);
+            if (channel == null) {
+                return;
             }
 
             StringBuilder description = new StringBuilder();

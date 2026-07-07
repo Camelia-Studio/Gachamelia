@@ -170,6 +170,25 @@ class RuntimeListenersAndCommandsTest {
     }
 
     @Test
+    void joinListenerAssignsRankRoleWhenWelcomeChannelIsMissing() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue(null, "11", "12"));
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, cache, messageService);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.PINK);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+        GuildMemberJoinEvent event = new GuildMemberJoinEvent(jdaSelf(), 1L, member);
+
+        listener.onGuildMemberJoin(event);
+
+        assertThat(capturedMessages.roleAssignments).containsExactly("user-1->99");
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+    }
+
+    @Test
     void joinListenerReturnsCleanlyWhenEnsureUserFails() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         botApiService.ensureUserFailure = new ApiException(502, "api_user_missing", "boom");
