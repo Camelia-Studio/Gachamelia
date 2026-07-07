@@ -15,12 +15,17 @@ public class BotEmojiScheduler implements AutoCloseable {
 
     private final GachameliaApiClient apiClient;
     private final EmojiSnapshotService snapshotService;
-    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService executor;
     private final AtomicBoolean started = new AtomicBoolean();
 
     public BotEmojiScheduler(GachameliaApiClient apiClient, EmojiSnapshotService snapshotService) {
+        this(apiClient, snapshotService, Executors.newSingleThreadScheduledExecutor());
+    }
+
+    BotEmojiScheduler(GachameliaApiClient apiClient, EmojiSnapshotService snapshotService, ScheduledExecutorService executor) {
         this.apiClient = apiClient;
         this.snapshotService = snapshotService;
+        this.executor = executor;
     }
 
     public void start(JDA jda) {
@@ -29,8 +34,13 @@ public class BotEmojiScheduler implements AutoCloseable {
             return;
         }
 
-        refreshBotEmojis(jda);
-        executor.scheduleAtFixedRate(() -> refreshBotEmojis(jda), 1, 1, TimeUnit.HOURS);
+        try {
+            refreshBotEmojis(jda);
+            executor.scheduleAtFixedRate(() -> refreshBotEmojis(jda), 1, 1, TimeUnit.HOURS);
+        } catch (RuntimeException | Error exception) {
+            started.set(false);
+            throw exception;
+        }
     }
 
     public void refreshBotEmojis(JDA jda) {
