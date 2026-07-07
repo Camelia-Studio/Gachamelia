@@ -31,6 +31,16 @@ class GuildCatalogueCacheTest {
                 .hasMessageContaining("guild-1");
     }
 
+    @Test
+    void removeDeletesStoredCatalogue() {
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        cache.put("guild-1", envelope("guild-1"));
+
+        cache.remove("guild-1");
+
+        assertThat(cache.find("guild-1")).isEmpty();
+    }
+
     private CatalogueEnvelope envelope(String guildId) {
         return new CatalogueEnvelope(
                 new ApiDiscordServer(guildId, "Guild", null, null),

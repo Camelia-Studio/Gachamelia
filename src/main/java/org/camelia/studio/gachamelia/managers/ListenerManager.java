@@ -4,9 +4,11 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.listeners.GuildEmojiListener;
+import org.camelia.studio.gachamelia.listeners.GuildLifecycleListener;
 import org.camelia.studio.gachamelia.listeners.GuildMemberJoinListener;
 import org.camelia.studio.gachamelia.listeners.GuildMemberLeaveListener;
 import org.camelia.studio.gachamelia.listeners.GuildMemberRoleChangeListener;
+import org.camelia.studio.gachamelia.listeners.ReadyListener;
 import org.camelia.studio.gachamelia.listeners.SlashCommandListener;
 import org.camelia.studio.gachamelia.services.CatalogueMessageService;
 import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
@@ -27,12 +29,14 @@ public class ListenerManager {
             BotApiService botApiService,
             GuildCatalogueCache catalogueCache,
             CatalogueMessageService messageService,
-            GuildEmojiRefreshDebouncer emojiRefreshDebouncer
+            GuildEmojiRefreshDebouncer emojiRefreshDebouncer,
+            ReadyListener readyListener
     ) {
         this.commandManager = commandManager;
         listener = new ArrayList<>();
 
         addListener(new SlashCommandListener(commandManager));
+        addListener(new GuildLifecycleListener(readyListener, catalogueCache));
         addListener(new GuildMemberJoinListener(botApiService, catalogueCache, messageService));
         addListener(new GuildMemberLeaveListener(botApiService, catalogueCache, messageService));
         addListener(new GuildMemberRoleChangeListener(botApiService, catalogueCache));

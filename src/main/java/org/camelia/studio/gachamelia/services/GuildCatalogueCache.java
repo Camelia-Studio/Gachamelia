@@ -17,6 +17,10 @@ public class GuildCatalogueCache {
         return Optional.ofNullable(catalogues.get(guildId));
     }
 
+    public void remove(String guildId) {
+        catalogues.remove(guildId);
+    }
+
     public CatalogueEnvelope require(String guildId) {
         CatalogueEnvelope envelope = catalogues.get(guildId);
         if (envelope == null) {

@@ -67,7 +67,8 @@ public class Gachamelia {
                     botApiService,
                     catalogueCache,
                     catalogueMessageService,
-                    emojiRefreshDebouncer
+                    emojiRefreshDebouncer,
+                    readyListener
             ).registerListeners(jda);
 
             JDA readyJda = jda;

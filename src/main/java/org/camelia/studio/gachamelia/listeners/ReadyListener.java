@@ -32,13 +32,17 @@ public class ReadyListener {
         botEmojiScheduler.start(jda);
 
         for (Guild guild : jda.getGuilds()) {
-            CatalogueEnvelope catalogue = botApiService.initializeGuild(guild);
-            if (!canInitializeMembers(guild, catalogue)) {
-                continue;
-            }
-            List<Member> members = guild.loadMembers().get();
-            initializeMembers(guild, catalogue, members);
+            initializeGuild(guild);
         }
+    }
+
+    public void initializeGuild(Guild guild) {
+        CatalogueEnvelope catalogue = botApiService.initializeGuild(guild);
+        if (!canInitializeMembers(guild, catalogue)) {
+            return;
+        }
+        List<Member> members = guild.loadMembers().get();
+        initializeMembers(guild, catalogue, members);
     }
 
     private boolean canInitializeMembers(Guild guild, CatalogueEnvelope catalogue) {
