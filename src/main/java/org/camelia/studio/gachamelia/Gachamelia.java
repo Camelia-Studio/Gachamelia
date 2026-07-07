@@ -9,7 +9,6 @@ import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.api.GachameliaApiClient;
 import org.camelia.studio.gachamelia.api.http.ApiTransport;
 import org.camelia.studio.gachamelia.api.http.JavaHttpApiTransport;
-import org.camelia.studio.gachamelia.db.HibernateConfig;
 import org.camelia.studio.gachamelia.listeners.ReadyListener;
 import org.camelia.studio.gachamelia.managers.CommandManager;
 import org.camelia.studio.gachamelia.managers.ListenerManager;
@@ -63,7 +62,6 @@ public class Gachamelia {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 emojiRefreshDebouncer.close();
                 botEmojiScheduler.close();
-                HibernateConfig.shutdown();
                 jda.shutdown();
             }));
         } catch (InterruptedException e) {

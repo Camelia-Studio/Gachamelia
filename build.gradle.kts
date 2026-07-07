@@ -30,9 +30,6 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    implementation("org.hibernate.orm:hibernate-core:7.4.3.Final")
-    implementation("org.hibernate.orm:hibernate-hikaricp:7.4.3.Final")
-    implementation("org.postgresql:postgresql:42.7.12")
     implementation("io.github.cdimascio:dotenv-kotlin:6.5.1")
     implementation("net.dv8tion:JDA:6.4.2")
     implementation("ch.qos.logback:logback-classic:1.5.37")
