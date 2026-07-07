@@ -70,6 +70,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 class RuntimeListenersAndCommandsTest {
     @Test
@@ -169,6 +170,26 @@ class RuntimeListenersAndCommandsTest {
     }
 
     @Test
+    void joinListenerReturnsCleanlyWhenEnsureUserFails() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        botApiService.ensureUserFailure = new ApiException(502, "api_user_missing", "boom");
+        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, cache, messageService);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.PINK);
+        TextChannel welcomeChannel = textChannel("10", capturedMessages);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of("10", welcomeChannel), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+        GuildMemberJoinEvent event = new GuildMemberJoinEvent(jdaSelf(), 1L, member);
+
+        assertThatCode(() -> listener.onGuildMemberJoin(event)).doesNotThrowAnyException();
+        assertThat(capturedMessages.roleAssignments).isEmpty();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+    }
+
+    @Test
     void leaveListenerUsesByeChannelAndFormatsUsername() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
@@ -193,6 +214,24 @@ class RuntimeListenersAndCommandsTest {
     }
 
     @Test
+    void leaveListenerReturnsCleanlyWhenCatalogueCacheIsMissing() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("A bientôt %username%."));
+        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, new GuildCatalogueCache(), messageService);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.CYAN);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+        User user = member.getUser();
+        GuildMemberRemoveEvent event = new GuildMemberRemoveEvent(jdaSelf(), 1L, guild, user, member);
+
+        assertThatCode(() -> listener.onGuildMemberRemove(event)).doesNotThrowAnyException();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+        assertThat(capturedMessages.roleAssignments).isEmpty();
+    }
+
+    @Test
     void roleChangeListenerEnsuresStaffUserFromGuildSettings() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
@@ -211,6 +250,24 @@ class RuntimeListenersAndCommandsTest {
         assertThat(botApiService.lastEnsureGuildId).isEqualTo("guild-1");
         assertThat(botApiService.lastEnsureUserId).isEqualTo("user-1");
         assertThat(capturedMessages.roleAssignments).containsExactly("user-1->99");
+    }
+
+    @Test
+    void roleChangeListenerReturnsCleanlyWhenEnsureStaffUserFails() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        botApiService.ensureStaffUserFailure = new ApiException(502, "api_user_missing", "boom");
+        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
+        GuildMemberRoleChangeListener listener = new GuildMemberRoleChangeListener(botApiService, cache);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.GREEN);
+        Role staffRole = role("12", "Staff", Color.BLUE);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole, "12", staffRole), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of(staffRole));
+        GuildMemberRoleAddEvent event = new GuildMemberRoleAddEvent(jdaSelf(), 1L, member, List.of(staffRole));
+
+        assertThatCode(() -> listener.onGuildMemberRoleAdd(event)).doesNotThrowAnyException();
+        assertThat(capturedMessages.roleAssignments).isEmpty();
     }
 
     @Test
@@ -579,6 +636,7 @@ class RuntimeListenersAndCommandsTest {
         private String lastEnsureGuildId;
         private String lastEnsureUserId;
         private RuntimeException ensureUserFailure;
+        private RuntimeException ensureStaffUserFailure;
 
         private RecordingBotApiService(UserEnvelope envelope) {
             super(null, null, null);
@@ -598,6 +656,9 @@ class RuntimeListenersAndCommandsTest {
 
         @Override
         public UserEnvelope ensureStaffUser(String guildId, String userDiscordId) {
+            if (ensureStaffUserFailure != null) {
+                throw ensureStaffUserFailure;
+            }
             ensureStaffUserCalls++;
             lastEnsureGuildId = guildId;
             lastEnsureUserId = userDiscordId;
