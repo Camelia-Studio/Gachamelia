@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class BotApiServiceTest {
     @Test
-    void ensureUserSurfaceReturnsApiUser() {
+    void ensureUserSendsExactlyEmptyObjectThroughApiClient() {
         CapturingTransport transport = new CapturingTransport(
                 new ApiTransportResponse(200, "{\"token_type\":\"Bearer\",\"access_token\":\"token-1\",\"expires_in\":3600}"),
                 new ApiTransportResponse(200, """
@@ -36,8 +36,37 @@ class BotApiServiceTest {
 
         assertThat(envelope.user().discordId()).isEqualTo("user-1");
         assertThat(transport.requests).hasSize(2);
-        assertThat(transport.requests.get(1).uri().toString())
-                .isEqualTo("https://example.test/api/discord-servers/guild-1/users/user-1");
+        ApiTransportRequest request = transport.requests.get(1);
+        assertThat(request.uri().toString()).isEqualTo("https://example.test/api/discord-servers/guild-1/users/user-1");
+        assertThat(request.body()).isEqualTo("{}");
+        assertThat(request.body()).doesNotContain("rank_id", "role_id", "element_ids");
+    }
+
+    @Test
+    void ensureStaffUserSendsExactlyStaffTrueThroughApiClient() {
+        CapturingTransport transport = new CapturingTransport(
+                new ApiTransportResponse(200, "{\"token_type\":\"Bearer\",\"access_token\":\"token-1\",\"expires_in\":3600}"),
+                new ApiTransportResponse(200, """
+                        {"user":{"id":1,"discord_id":"user-2","rank":{"id":2,"discord_id":"99","name":"Modérateur","is_staff":true},"role":{"id":3,"name":"Comète"},"elements":[{"id":4,"name":"Ambre"}],"stats":[]}}
+                        """)
+        );
+        ApiConfiguration configuration = new ApiConfiguration("https://example.test", "client", "secret");
+        ApiTokenProvider tokenProvider = new ApiTokenProvider(
+                configuration,
+                transport,
+                Clock.fixed(Instant.parse("2026-07-06T10:00:00Z"), ZoneOffset.UTC)
+        );
+        GachameliaApiClient apiClient = new GachameliaApiClient(configuration, tokenProvider, transport);
+        BotApiService service = new BotApiService(apiClient, null, null);
+
+        UserEnvelope envelope = service.ensureStaffUser("guild-1", "user-2");
+
+        assertThat(envelope.user().discordId()).isEqualTo("user-2");
+        assertThat(transport.requests).hasSize(2);
+        ApiTransportRequest request = transport.requests.get(1);
+        assertThat(request.uri().toString()).isEqualTo("https://example.test/api/discord-servers/guild-1/users/user-2");
+        assertThat(request.body()).isEqualTo("{\"staff\":true}");
+        assertThat(request.body()).doesNotContain("rank_id", "role_id", "element_ids");
     }
 
     static class CapturingTransport implements ApiTransport {

@@ -6,11 +6,13 @@ import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.events.session.ReadyEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import org.camelia.studio.gachamelia.api.ApiException;
 import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.dto.ApiDiscordServer;
+import org.camelia.studio.gachamelia.api.dto.ApiUser;
 import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
 import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.services.BotEmojiScheduler;
-import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,12 +22,10 @@ public class ReadyListener extends ListenerAdapter {
     private static final Logger logger = LoggerFactory.getLogger(ReadyListener.class);
 
     private final BotApiService botApiService;
-    private final GuildCatalogueCache catalogueCache;
     private final BotEmojiScheduler botEmojiScheduler;
 
-    public ReadyListener(BotApiService botApiService, GuildCatalogueCache catalogueCache, BotEmojiScheduler botEmojiScheduler) {
+    public ReadyListener(BotApiService botApiService, BotEmojiScheduler botEmojiScheduler) {
         this.botApiService = botApiService;
-        this.catalogueCache = catalogueCache;
         this.botEmojiScheduler = botEmojiScheduler;
     }
 
@@ -41,8 +41,10 @@ public class ReadyListener extends ListenerAdapter {
     }
 
     private void initializeMembers(Guild guild, CatalogueEnvelope catalogue, List<Member> members) {
-        catalogueCache.put(guild.getId(), catalogue);
-        String staffRoleId = catalogue.server().settings() != null ? catalogue.server().settings().staffRoleId() : null;
+        ApiDiscordServer server = requireServer(guild, catalogue);
+        String staffRoleId = server.settings() != null
+                ? server.settings().staffRoleId()
+                : null;
         Role staffRole = staffRoleId != null ? guild.getRoleById(staffRoleId) : null;
 
         for (Member member : members) {
@@ -55,10 +57,40 @@ public class ReadyListener extends ListenerAdapter {
     }
 
     private void addRankRole(Guild guild, Member member, UserEnvelope envelope) {
-        String rankRoleId = envelope.user().rank().discordId();
+        ApiUser user = requireUser(guild, member, envelope);
+        if (user.rank() == null) {
+            throw new ApiException(
+                    502,
+                    "api_user_rank_missing",
+                    "Missing rank in API user payload for guild %s and member %s".formatted(guild.getId(), member.getId())
+            );
+        }
+        String rankRoleId = user.rank().discordId();
         Role rankRole = rankRoleId != null ? guild.getRoleById(rankRoleId) : null;
         if (rankRole != null) {
             guild.addRoleToMember(member, rankRole).queue();
         }
+    }
+
+    private ApiDiscordServer requireServer(Guild guild, CatalogueEnvelope catalogue) {
+        if (catalogue.server() == null) {
+            throw new ApiException(
+                    502,
+                    "catalogue_server_missing",
+                    "Missing server in catalogue payload for guild %s".formatted(guild.getId())
+            );
+        }
+        return catalogue.server();
+    }
+
+    private ApiUser requireUser(Guild guild, Member member, UserEnvelope envelope) {
+        if (envelope.user() == null) {
+            throw new ApiException(
+                    502,
+                    "api_user_missing",
+                    "Missing user in API payload for guild %s and member %s".formatted(guild.getId(), member.getId())
+            );
+        }
+        return envelope.user();
     }
 }

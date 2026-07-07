@@ -28,11 +28,7 @@ public class BotApiService {
     }
 
     public UserEnvelope ensureUser(String guildId, String userDiscordId) {
-        try {
-            return apiClient.ensureUser(guildId, userDiscordId);
-        } catch (ApiException exception) {
-            throw exception;
-        }
+        return apiClient.ensureUser(guildId, userDiscordId);
     }
 
     public UserEnvelope ensureStaffUser(String guildId, String userDiscordId) {

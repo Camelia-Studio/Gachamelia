@@ -42,7 +42,7 @@ public class Gachamelia {
             GuildEmojiRefreshDebouncer emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
 
             jda = JDABuilder.createDefault(Configuration.getInstance().getDotenv().get("BOT_TOKEN"))
-                    .addEventListeners(new ReadyListener(botApiService, catalogueCache, botEmojiScheduler))
+                    .addEventListeners(new ReadyListener(botApiService, botEmojiScheduler))
                     .enableIntents(GatewayIntent.getIntents(GatewayIntent.ALL_INTENTS))
                     .build()
                     .awaitReady();
