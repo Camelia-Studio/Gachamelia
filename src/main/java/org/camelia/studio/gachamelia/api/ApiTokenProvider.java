@@ -63,6 +63,8 @@ public class ApiTokenProvider {
             token = tokenResponse.accessToken();
             expiresAt = Instant.now(clock).plusSeconds(tokenResponse.expiresIn());
             return token;
+        } catch (ApiException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new ApiException(response.statusCode(), "invalid_token_response", exception.getMessage());
         }

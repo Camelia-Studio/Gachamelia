@@ -96,6 +96,23 @@ class ApiTokenProviderTest {
     }
 
     @Test
+    void throwsApiExceptionWhenTokenResponseIsNotJson() {
+        CapturingTransport transport = new CapturingTransport(
+                new ApiTransportResponse(200, "not valid json")
+        );
+        ApiTokenProvider provider = new ApiTokenProvider(
+                new ApiConfiguration("https://example.test", "client", "secret"),
+                transport,
+                Clock.fixed(Instant.parse("2026-07-06T10:00:00Z"), ZoneOffset.UTC)
+        );
+
+        ApiException exception = assertThrows(ApiException.class, provider::getToken);
+
+        assertThat(exception.statusCode()).isEqualTo(200);
+        assertThat(exception.errorCode()).isEqualTo("invalid_token_response");
+    }
+
+    @Test
     void interruptsCurrentThreadWhenTransportIsInterrupted() {
         ApiTokenProvider provider = new ApiTokenProvider(
                 new ApiConfiguration("https://example.test", "client", "secret"),
