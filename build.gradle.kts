@@ -25,6 +25,10 @@ tasks.withType<ShadowJar>().configureEach {
     archiveFileName.set("gachamelia.jar")
 }
 
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+}
+
 dependencies {
     implementation("org.hibernate.orm:hibernate-core:7.4.3.Final")
     implementation("org.hibernate.orm:hibernate-hikaricp:7.4.3.Final")
@@ -33,6 +37,11 @@ dependencies {
     implementation("net.dv8tion:JDA:6.4.2")
     implementation("ch.qos.logback:logback-classic:1.5.37")
     implementation("jakarta.annotation:jakarta.annotation-api:3.0.0")
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.22.0")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.1")
+    testImplementation("org.assertj:assertj-core:4.0.0-M1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 

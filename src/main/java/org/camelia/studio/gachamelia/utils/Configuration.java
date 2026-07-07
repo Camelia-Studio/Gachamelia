@@ -20,4 +20,12 @@ public class Configuration {
     public Dotenv getDotenv() {
         return dotenv;
     }
+
+    public String getRequired(String key) {
+        String value = dotenv.get(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(key + " is required");
+        }
+        return value;
+    }
 }
