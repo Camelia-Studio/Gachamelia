@@ -70,6 +70,22 @@ class ReadyListenerTest {
                 .hasMessage("load failure");
     }
 
+    @Test
+    void initializeSkipsMemberLoadingWhenCatalogueIsEmpty() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(new CatalogueEnvelope(
+                new ApiDiscordServer("guild-1", "Gachamélia", "icon", new ApiServerSettings(null, null, null)),
+                new ApiCatalogue(List.of(), List.of(), List.of(), List.of())
+        ));
+        ReadyListener listener = new ReadyListener(botApiService, new RecordingBotEmojiScheduler());
+        Guild guild = guild("guild-1", List.of(), Map.of(), new ArrayList<>(), true);
+
+        listener.initialize(jda(List.of(guild)));
+
+        assertThat(botApiService.initializeGuildCalls).isEqualTo(1);
+        assertThat(botApiService.ensureStaffUserCalls).isZero();
+    }
+
+
     private static JDA jda(List<Guild> guilds) {
         SelfUser selfUser = proxy(
                 SelfUser.class,
@@ -216,25 +232,31 @@ class ReadyListenerTest {
     }
 
     private static final class RecordingBotApiService extends BotApiService {
+        private final CatalogueEnvelope catalogueEnvelope;
         private int initializeGuildCalls;
         private int ensureStaffUserCalls;
 
         private RecordingBotApiService() {
-            super(null, null, null);
-        }
-
-        @Override
-        public CatalogueEnvelope initializeGuild(Guild guild) {
-            initializeGuildCalls++;
-            return new CatalogueEnvelope(
-                    new ApiDiscordServer(guild.getId(), "Gachamélia", "icon", new ApiServerSettings(null, null, "staff-1")),
+            this(new CatalogueEnvelope(
+                    new ApiDiscordServer("guild-1", "Gachamélia", "icon", new ApiServerSettings(null, null, "staff-1")),
                     new ApiCatalogue(
                             List.of(new ApiRank(1L, "rank-1", "Novice", 100, null, false, List.of(), List.of(), List.of())),
                             List.of(new ApiRole(2L, "Comète", 100, null)),
                             List.of(new ApiStat(3L, "Force")),
                             List.of(new ApiElement(4L, "Ambre", null))
                     )
-            );
+            ));
+        }
+
+        private RecordingBotApiService(CatalogueEnvelope catalogueEnvelope) {
+            super(null, null, null);
+            this.catalogueEnvelope = catalogueEnvelope;
+        }
+
+        @Override
+        public CatalogueEnvelope initializeGuild(Guild guild) {
+            initializeGuildCalls++;
+            return catalogueEnvelope;
         }
 
         @Override

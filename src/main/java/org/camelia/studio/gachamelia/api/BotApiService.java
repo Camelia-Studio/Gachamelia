@@ -51,14 +51,5 @@ public class BotApiService {
         if (envelope.catalogue().elements() == null) {
             throw new ApiException(502, "catalogue_elements_missing", "Catalogue elements missing for guild " + guildId);
         }
-        if (envelope.catalogue().ranks().isEmpty()) {
-            throw new ApiException(409, "rank_catalogue_empty", "Rank catalogue empty for guild " + guildId);
-        }
-        if (envelope.catalogue().roles().isEmpty()) {
-            throw new ApiException(409, "role_catalogue_empty", "Role catalogue empty for guild " + guildId);
-        }
-        if (envelope.catalogue().elements().isEmpty()) {
-            throw new ApiException(409, "element_catalogue_empty", "Element catalogue empty for guild " + guildId);
-        }
     }
 }

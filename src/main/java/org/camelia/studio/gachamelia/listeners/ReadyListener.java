@@ -33,9 +33,32 @@ public class ReadyListener {
 
         for (Guild guild : jda.getGuilds()) {
             CatalogueEnvelope catalogue = botApiService.initializeGuild(guild);
+            if (!canInitializeMembers(guild, catalogue)) {
+                continue;
+            }
             List<Member> members = guild.loadMembers().get();
             initializeMembers(guild, catalogue, members);
         }
+    }
+
+    private boolean canInitializeMembers(Guild guild, CatalogueEnvelope catalogue) {
+        if (catalogue == null || catalogue.catalogue() == null) {
+            logger.warn("Catalogue absent pour le serveur {}, initialisation des membres ignorée", guild.getId());
+            return false;
+        }
+        if (catalogue.catalogue().ranks() == null || catalogue.catalogue().ranks().isEmpty()) {
+            logger.warn("Catalogue de rangs vide pour le serveur {}, initialisation des membres ignorée", guild.getId());
+            return false;
+        }
+        if (catalogue.catalogue().roles() == null || catalogue.catalogue().roles().isEmpty()) {
+            logger.warn("Catalogue de rôles vide pour le serveur {}, initialisation des membres ignorée", guild.getId());
+            return false;
+        }
+        if (catalogue.catalogue().elements() == null || catalogue.catalogue().elements().isEmpty()) {
+            logger.warn("Catalogue d'éléments vide pour le serveur {}, initialisation des membres ignorée", guild.getId());
+            return false;
+        }
+        return true;
     }
 
     private void initializeMembers(Guild guild, CatalogueEnvelope catalogue, List<Member> members) {

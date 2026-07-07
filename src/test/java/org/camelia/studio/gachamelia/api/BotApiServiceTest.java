@@ -115,6 +115,21 @@ class BotApiServiceTest {
                 .hasMessageContaining("Catalogue elements missing");
     }
 
+    @Test
+    void initializeGuildAcceptsEmptyCatalogue() {
+        CatalogueEnvelope emptyEnvelope = new CatalogueEnvelope(
+                new ApiDiscordServer("guild-1", "Gachamélia", "icon", new ApiServerSettings(null, null, null)),
+                new ApiCatalogue(List.of(), List.of(), List.of(), List.of())
+        );
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        BotApiService service = new BotApiService(new StubApiClient(emptyEnvelope), cache, new EmojiSnapshotService());
+
+        CatalogueEnvelope envelope = service.initializeGuild(guild("guild-1"));
+
+        assertThat(envelope).isSameAs(emptyEnvelope);
+        assertThat(cache.find("guild-1")).containsSame(emptyEnvelope);
+    }
+
     private static net.dv8tion.jda.api.entities.Guild guild(String guildId) {
         return (net.dv8tion.jda.api.entities.Guild) java.lang.reflect.Proxy.newProxyInstance(
                 net.dv8tion.jda.api.entities.Guild.class.getClassLoader(),
