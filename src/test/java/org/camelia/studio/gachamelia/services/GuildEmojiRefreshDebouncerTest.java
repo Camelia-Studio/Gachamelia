@@ -17,7 +17,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,6 +46,74 @@ class GuildEmojiRefreshDebouncerTest {
             assertThat(request.emojis()).hasSize(1);
             assertThat(request.emojis().getFirst().id()).isEqualTo("20");
             assertThat(request.emojis().getFirst().animated()).isTrue();
+        }
+    }
+
+    @Test
+    void coalescesTrailingRefreshRequestsWhileSameGuildRefreshIsInFlight() {
+        BlockingApiClient apiClient = new BlockingApiClient("guild-1");
+        EmojiSnapshotService snapshotService = new EmojiSnapshotService();
+        Duration delay = Duration.ofMillis(120);
+
+        try (GuildEmojiRefreshDebouncer debouncer = new GuildEmojiRefreshDebouncer(apiClient, snapshotService, delay)) {
+            debouncer.requestRefresh(guild("guild-1", List.of(emoji("10", "ambre", false, true))));
+            assertThat(apiClient.awaitEntered("guild-1", Duration.ofSeconds(1))).isTrue();
+
+            debouncer.requestRefresh(guild("guild-1", List.of(emoji("20", "gachamelia", true, true))));
+            debouncer.requestRefresh(guild("guild-1", List.of(emoji("30", "orion", false, true))));
+
+            Thread.sleep(delay.plusMillis(40));
+            assertThat(apiClient.requests).hasSize(1);
+
+            long releasedAt = System.nanoTime();
+            apiClient.release("guild-1");
+
+            waitUntil(() -> apiClient.requests.size() == 2, Duration.ofSeconds(1));
+
+            assertThat(apiClient.requests).hasSize(2);
+            assertThat(apiClient.requests.get(0).discordServerId()).isEqualTo("guild-1");
+            assertThat(apiClient.requests.get(0).emojis().getFirst().id()).isEqualTo("10");
+            assertThat(apiClient.requests.get(1).discordServerId()).isEqualTo("guild-1");
+            assertThat(apiClient.requests.get(1).emojis().getFirst().id()).isEqualTo("30");
+            assertThat(Duration.ofNanos(apiClient.requestStartedAtNanos(1) - releasedAt))
+                    .isGreaterThanOrEqualTo(delay.minusMillis(30));
+            assertThat(apiClient.maxConcurrentForGuild("guild-1")).isEqualTo(1);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("test interrupted", exception);
+        }
+    }
+
+    @Test
+    void keepsSeparateGuildDebounceStateIndependent() {
+        BlockingApiClient apiClient = new BlockingApiClient("guild-1");
+        EmojiSnapshotService snapshotService = new EmojiSnapshotService();
+
+        try (GuildEmojiRefreshDebouncer debouncer = new GuildEmojiRefreshDebouncer(apiClient, snapshotService, Duration.ofMillis(10))) {
+            debouncer.requestRefresh(guild("guild-1", List.of(emoji("10", "ambre", false, true))));
+            assertThat(apiClient.awaitEntered("guild-1", Duration.ofSeconds(1))).isTrue();
+
+            debouncer.requestRefresh(guild("guild-1", List.of(emoji("11", "ambre-plus", false, true))));
+            debouncer.requestRefresh(guild("guild-2", List.of(emoji("20", "gachamelia", true, true))));
+            debouncer.requestRefresh(guild("guild-2", List.of(emoji("21", "orion", false, true))));
+
+            apiClient.release("guild-1");
+
+            waitUntil(() -> apiClient.requests.size() == 3, Duration.ofSeconds(1));
+
+            Map<String, List<EmojiSnapshotRequest>> requestsByGuild = apiClient.requests.stream()
+                    .collect(Collectors.groupingBy(EmojiSnapshotRequest::discordServerId));
+
+            assertThat(requestsByGuild).hasSize(2);
+            assertThat(requestsByGuild.get("guild-1"))
+                    .extracting(request -> request.emojis().getFirst().id())
+                    .containsExactly("10", "11");
+            assertThat(requestsByGuild.get("guild-2"))
+                    .singleElement()
+                    .extracting(request -> request.emojis().getFirst().id())
+                    .isEqualTo("21");
+            assertThat(apiClient.maxConcurrentForGuild("guild-1")).isEqualTo(1);
+            assertThat(apiClient.maxConcurrentForGuild("guild-2")).isEqualTo(1);
         }
     }
 
@@ -113,6 +187,78 @@ class GuildEmojiRefreshDebouncerTest {
         public org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse refreshEmojis(EmojiSnapshotRequest request) {
             requests.add(request);
             return null;
+        }
+    }
+
+    private static final class BlockingApiClient extends GachameliaApiClient {
+        private final List<EmojiSnapshotRequest> requests = new CopyOnWriteArrayList<>();
+        private final List<Long> requestStartTimes = new CopyOnWriteArrayList<>();
+        private final Map<String, CountDownLatch> entered = new ConcurrentHashMap<>();
+        private final Map<String, CountDownLatch> releases = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> inFlightByGuild = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> maxConcurrentByGuild = new ConcurrentHashMap<>();
+        private final String blockingGuildId;
+
+        private BlockingApiClient(String blockingGuildId) {
+            super(
+                    new ApiConfiguration("https://example.test", "client", "secret"),
+                    new ApiTokenProvider(
+                            new ApiConfiguration("https://example.test", "client", "secret"),
+                            new NoOpTransport(),
+                            Clock.fixed(Instant.parse("2026-07-07T10:00:00Z"), ZoneOffset.UTC)
+                    ),
+                    new NoOpTransport()
+            );
+            this.blockingGuildId = blockingGuildId;
+        }
+
+        @Override
+        public org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse refreshEmojis(EmojiSnapshotRequest request) {
+            String guildId = request.discordServerId();
+            AtomicInteger inFlight = inFlightByGuild.computeIfAbsent(guildId, ignored -> new AtomicInteger());
+            int current = inFlight.incrementAndGet();
+            maxConcurrentByGuild.computeIfAbsent(guildId, ignored -> new AtomicInteger()).accumulateAndGet(current, Math::max);
+
+            try {
+                requestStartTimes.add(System.nanoTime());
+                requests.add(request);
+                if (blockingGuildId.equals(guildId)) {
+                    entered.computeIfAbsent(guildId, ignored -> new CountDownLatch(1)).countDown();
+                    CountDownLatch releaseLatch = releases.computeIfAbsent(guildId, ignored -> new CountDownLatch(1));
+                    if (!releaseLatch.await(1, TimeUnit.SECONDS)) {
+                        throw new AssertionError("timed out waiting to release " + guildId);
+                    }
+                }
+                return null;
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("test interrupted", exception);
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        }
+
+        private boolean awaitEntered(String guildId, Duration timeout) {
+            try {
+                return entered.computeIfAbsent(guildId, ignored -> new CountDownLatch(1))
+                        .await(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("test interrupted", exception);
+            }
+        }
+
+        private void release(String guildId) {
+            releases.computeIfAbsent(guildId, ignored -> new CountDownLatch(1)).countDown();
+        }
+
+        private int maxConcurrentForGuild(String guildId) {
+            AtomicInteger counter = maxConcurrentByGuild.get(guildId);
+            return counter == null ? 0 : counter.get();
+        }
+
+        private long requestStartedAtNanos(int index) {
+            return requestStartTimes.get(index);
         }
     }
 

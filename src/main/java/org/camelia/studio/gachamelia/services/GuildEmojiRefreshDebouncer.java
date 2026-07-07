@@ -20,7 +20,7 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
     private final EmojiSnapshotService snapshotService;
     private final Duration delay;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
-    private final Map<String, ScheduledFuture<?>> pending = new ConcurrentHashMap<>();
+    private final Map<String, GuildRefreshState> states = new ConcurrentHashMap<>();
 
     public GuildEmojiRefreshDebouncer(GachameliaApiClient apiClient, EmojiSnapshotService snapshotService, Duration delay) {
         this.apiClient = apiClient;
@@ -29,25 +29,73 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
     }
 
     public void requestRefresh(Guild guild) {
-        ScheduledFuture<?> existing = pending.remove(guild.getId());
-        if (existing != null) {
-            existing.cancel(false);
+        states.compute(guild.getId(), (guildId, existingState) -> {
+            GuildRefreshState state = existingState == null ? new GuildRefreshState() : existingState;
+            synchronized (state) {
+                state.latestGuild = guild;
+                if (state.inFlight) {
+                    state.trailingRequested = true;
+                    return state;
+                }
+
+                scheduleLocked(guildId, state);
+                return state;
+            }
+        });
+    }
+
+    private void scheduleLocked(String guildId, GuildRefreshState state) {
+        if (state.pendingFuture != null) {
+            state.pendingFuture.cancel(false);
         }
 
-        ScheduledFuture<?> scheduled = executor.schedule(() -> {
-            pending.remove(guild.getId());
-            try {
-                apiClient.refreshEmojis(snapshotService.serverSnapshot(guild.getId(), guild.getEmojis()));
-            } catch (Exception exception) {
-                logger.warn("Impossible de rafraîchir les emojis du serveur {}", guild.getId(), exception);
-            }
-        }, delay.toMillis(), TimeUnit.MILLISECONDS);
+        state.pendingFuture = executor.schedule(() -> runRefresh(guildId, state), delay.toMillis(), TimeUnit.MILLISECONDS);
+    }
 
-        pending.put(guild.getId(), scheduled);
+    private void runRefresh(String guildId, GuildRefreshState state) {
+        Guild guild;
+        synchronized (state) {
+            state.pendingFuture = null;
+            guild = state.latestGuild;
+            if (guild == null) {
+                cleanupState(guildId, state);
+                return;
+            }
+            state.inFlight = true;
+        }
+
+        try {
+            apiClient.refreshEmojis(snapshotService.serverSnapshot(guild.getId(), guild.getEmojis()));
+        } catch (Exception exception) {
+            logger.warn("Impossible de rafraîchir les emojis du serveur {}", guild.getId(), exception);
+        } finally {
+            synchronized (state) {
+                state.inFlight = false;
+                if (state.trailingRequested) {
+                    state.trailingRequested = false;
+                    scheduleLocked(guildId, state);
+                } else {
+                    cleanupState(guildId, state);
+                }
+            }
+        }
+    }
+
+    private void cleanupState(String guildId, GuildRefreshState state) {
+        if (state.pendingFuture == null && !state.inFlight && !state.trailingRequested) {
+            states.remove(guildId, state);
+        }
     }
 
     @Override
     public void close() {
         executor.shutdownNow();
+    }
+
+    private static final class GuildRefreshState {
+        private Guild latestGuild;
+        private ScheduledFuture<?> pendingFuture;
+        private boolean inFlight;
+        private boolean trailingRequested;
     }
 }
