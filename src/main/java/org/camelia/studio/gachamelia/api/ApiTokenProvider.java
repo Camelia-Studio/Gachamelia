@@ -43,6 +43,9 @@ public class ApiTokenProvider {
                     Map.of("Authorization", basicAuthorization()),
                     null
             ));
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ApiException(0, "token_request_failed", exception.getMessage());
         } catch (Exception exception) {
             throw new ApiException(0, "token_request_failed", exception.getMessage());
         }
@@ -53,6 +56,10 @@ public class ApiTokenProvider {
 
         try {
             AuthTokenResponse tokenResponse = objectMapper.readValue(response.body(), AuthTokenResponse.class);
+            if (tokenResponse.accessToken() == null || tokenResponse.accessToken().isBlank() || tokenResponse.expiresIn() <= 0) {
+                throw new ApiException(response.statusCode(), "invalid_token_response", "Invalid token response");
+            }
+
             token = tokenResponse.accessToken();
             expiresAt = Instant.now(clock).plusSeconds(tokenResponse.expiresIn());
             return token;
