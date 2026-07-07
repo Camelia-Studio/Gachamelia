@@ -6,30 +6,51 @@ import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberRemoveEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import org.camelia.studio.gachamelia.models.ByeMessage;
-import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.services.RankService;
-import org.camelia.studio.gachamelia.services.UserService;
-import org.camelia.studio.gachamelia.utils.Configuration;
+import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
+import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
+import org.camelia.studio.gachamelia.services.CatalogueMessageService;
+import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
 
-
 public class GuildMemberLeaveListener extends ListenerAdapter {
+    private final BotApiService botApiService;
+    private final GuildCatalogueCache catalogueCache;
+    private final CatalogueMessageService messageService;
+
+    public GuildMemberLeaveListener(
+            BotApiService botApiService,
+            GuildCatalogueCache catalogueCache,
+            CatalogueMessageService messageService
+    ) {
+        this.botApiService = botApiService;
+        this.catalogueCache = catalogueCache;
+        this.messageService = messageService;
+    }
 
     @Override
     public void onGuildMemberRemove(@Nonnull GuildMemberRemoveEvent event) {
-
         net.dv8tion.jda.api.entities.User discordUser = event.getUser();
-        User user = UserService.getInstance().getOrCreateUser(discordUser.getId());
+        UserEnvelope envelope = botApiService.ensureUser(event.getGuild().getId(), discordUser.getId());
+        if (envelope.user() == null || envelope.user().rank() == null) {
+            return;
+        }
 
-        ByeMessage byeMessage = RankService.getInstance().getRandomByeMessage(user.getRank());
+        CatalogueEnvelope catalogue = catalogueCache.require(event.getGuild().getId());
+        String byeChannelId = catalogue.server().settings() != null ? catalogue.server().settings().byeChannelId() : null;
+        if (byeChannelId == null || byeChannelId.isBlank()) {
+            return;
+        }
 
-        TextChannel channel = event.getGuild().getTextChannelById(Configuration.getInstance().getDotenv().get("WELCOME_CHANNEL", "0"));
+        TextChannel channel = event.getGuild().getTextChannelById(byeChannelId);
+        if (channel == null) {
+            return;
+        }
 
 
-        Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
+        Role role = event.getGuild().getRoleById(envelope.user().rank().discordId());
         Color color = new Color(0, 0, 0);
 
         if (role != null) {
@@ -39,19 +60,15 @@ public class GuildMemberLeaveListener extends ListenerAdapter {
             }
         }
 
-
+        String byeMessage = messageService.randomByeMessage(catalogue, envelope.user().rank().id()).orElse("");
         StringBuilder description = new StringBuilder();
-        description.append(byeMessage.getMessage().replace("%username%", "**" + discordUser.getEffectiveName() + "**"));
+        description.append(byeMessage.replace("%username%", "**" + discordUser.getEffectiveName() + "**"));
 
         EmbedBuilder embedBuilder = EmbedUtils.createDefaultEmbed(event.getJDA())
-                .setTitle(user.getRank().getByeTitle() != null ? user.getRank().getByeTitle() : "Au revoir, %s !".formatted(discordUser.getEffectiveName()))
+                .setTitle("Au revoir, %s !".formatted(discordUser.getEffectiveName()))
                 .setDescription(description)
                 .setThumbnail(discordUser.getEffectiveAvatarUrl())
                 .setColor(color);
-
-
-        if (channel != null) {
-            channel.sendMessageEmbeds(embedBuilder.build()).queue();
-        }
+        channel.sendMessageEmbeds(embedBuilder.build()).queue();
     }
 }

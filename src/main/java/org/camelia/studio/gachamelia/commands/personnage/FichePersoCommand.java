@@ -7,19 +7,30 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.dto.ApiRole;
+import org.camelia.studio.gachamelia.api.dto.ApiUser;
+import org.camelia.studio.gachamelia.api.dto.ApiUserStat;
+import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
+import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
-import org.camelia.studio.gachamelia.models.Element;
-import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.models.UserStat;
-import org.camelia.studio.gachamelia.repositories.StatRepository;
-import org.camelia.studio.gachamelia.services.UserService;
+import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
 import java.util.List;
+import java.util.Optional;
 
 public class FichePersoCommand implements ISlashCommand {
+    private final BotApiService botApiService;
+    private final GuildCatalogueCache catalogueCache;
+
+    public FichePersoCommand(BotApiService botApiService, GuildCatalogueCache catalogueCache) {
+        this.botApiService = botApiService;
+        this.catalogueCache = catalogueCache;
+    }
+
     @Override
     public String getName() {
         return "ficheperso";
@@ -53,10 +64,20 @@ public class FichePersoCommand implements ISlashCommand {
         }
 
         EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
-        User user = UserService.getInstance().getOrCreateUser(member.getId());
-        Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
+        UserEnvelope envelope = botApiService.ensureUser(event.getGuild().getId(), member.getId());
+        if (envelope.user() == null || envelope.user().rank() == null || envelope.user().role() == null) {
+            event.getHook().editOriginal("La fiche de personnage n'a pas pu être chargée").queue();
+            return;
+        }
+
+        ApiUser user = envelope.user();
+        CatalogueEnvelope catalogue = catalogueCache.require(event.getGuild().getId());
+        Role role = event.getGuild().getRoleById(user.rank().discordId());
         Color color = role != null && role.getColors().getPrimary() != null ? role.getColors().getPrimary() : Color.WHITE;
-        List<UserStat> stats = StatRepository.getInstance().getUserStats(user);
+        Optional<ApiRole> catalogueRole = catalogue.catalogue().roles().stream()
+                .filter(candidate -> candidate.id() == user.role().id())
+                .findFirst();
+        String emblem = catalogueRole.map(ApiRole::emoji).map(emoji -> emoji.markup() != null ? emoji.markup() : "Ø").orElse("Ø");
 
         StringBuilder description = new StringBuilder("""
                 __Caractéristiques principales__ :
@@ -69,21 +90,18 @@ public class FichePersoCommand implements ISlashCommand {
                 __Statistiques de combat__ :
                 """.formatted(
                 member.getEffectiveName(),
-                user.getRank().getName(),
-                user.getRole().getName(),
-                user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2),
+                user.rank().name(),
+                user.role().name(),
+                user.elements().stream().map(ApiUser.ApiElementSummary::name).reduce((a, b) -> a + ", " + b).orElse("Ø"),
                 Configuration.getInstance().getDotenv().get("XP_EMOJI", "XP"),
                 0,
-                "Ø"
+                emblem
         ));
 
-        for (UserStat stat : stats) {
-            int userStat = stat.getValue();
-            int equipmentStat = 0;
-            description.append("- %s : **%d** (%d + %d)\n".formatted(stat.getStat().getName(), userStat + equipmentStat, userStat, equipmentStat));
+        for (ApiUserStat stat : user.stats()) {
+            description.append("- %s : **%d** (%d + %d)\n".formatted(stat.name(), stat.value(), stat.value(), 0));
         }
 
-        embedGeneralite.setAuthor(member.getEffectiveName(), null, user.getRole().getImageUrl());
         embedGeneralite.setTitle("Fiche de personnage");
         embedGeneralite.setColor(color);
         embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());

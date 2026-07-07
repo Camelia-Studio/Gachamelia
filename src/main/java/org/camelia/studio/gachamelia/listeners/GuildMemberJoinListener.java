@@ -7,28 +7,51 @@ import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.guild.member.GuildMemberJoinEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import org.camelia.studio.gachamelia.models.Element;
-import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.models.WelcomeMessage;
-import org.camelia.studio.gachamelia.services.RankService;
-import org.camelia.studio.gachamelia.services.UserService;
-import org.camelia.studio.gachamelia.utils.Configuration;
+import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.dto.ApiUser;
+import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
+import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
+import org.camelia.studio.gachamelia.services.CatalogueMessageService;
+import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
 
 import java.awt.*;
 
-
 public class GuildMemberJoinListener extends ListenerAdapter {
+    private final BotApiService botApiService;
+    private final GuildCatalogueCache catalogueCache;
+    private final CatalogueMessageService messageService;
+
+    public GuildMemberJoinListener(
+            BotApiService botApiService,
+            GuildCatalogueCache catalogueCache,
+            CatalogueMessageService messageService
+    ) {
+        this.botApiService = botApiService;
+        this.catalogueCache = catalogueCache;
+        this.messageService = messageService;
+    }
+
     @Override
     public void onGuildMemberJoin(@Nonnull GuildMemberJoinEvent event) {
         Member member = event.getMember();
-        User user = UserService.getInstance().getOrCreateUser(member.getId());
+        UserEnvelope envelope = botApiService.ensureUser(event.getGuild().getId(), member.getId());
+        if (envelope.user() == null || envelope.user().rank() == null || envelope.user().role() == null) {
+            return;
+        }
 
-        WelcomeMessage welcomeMessage = RankService.getInstance().getRandomWelcomeMessage(user.getRank());
+        CatalogueEnvelope catalogue = catalogueCache.require(event.getGuild().getId());
+        String welcomeChannelId = catalogue.server().settings() != null ? catalogue.server().settings().welcomeChannelId() : null;
+        if (welcomeChannelId == null || welcomeChannelId.isBlank()) {
+            return;
+        }
 
-        TextChannel channel = event.getGuild().getTextChannelById(Configuration.getInstance().getDotenv().get("WELCOME_CHANNEL", "0"));
+        TextChannel channel = event.getGuild().getTextChannelById(welcomeChannelId);
+        if (channel == null) {
+            return;
+        }
 
-        Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
+        Role role = event.getGuild().getRoleById(envelope.user().rank().discordId());
         Color color = new Color(0, 0, 0);
 
         if (role != null) {
@@ -41,17 +64,23 @@ public class GuildMemberJoinListener extends ListenerAdapter {
 
 
         StringBuilder description = new StringBuilder();
+        ApiUser user = envelope.user();
+        String welcomeMessage = messageService.randomWelcomeMessage(catalogue, user.rank().id()).orElse("");
         description.append("Bravo ! Vous venez d'invoquer ")
                 .append(member.getAsMention()).append(" !\n")
                 .append("Il s'agit d'un personnage de rareté ")
-                .append(user.getRank().getName()).append(" ! ")
-                .append(welcomeMessage.getMessage());
+                .append(user.rank().name()).append(" ! ");
+
+        if (!welcomeMessage.isBlank()) {
+            description.append(welcomeMessage);
+        }
 
         description.append("\n\n")
                 .append("__Caractéristiques principales__ :\n")
-                .append("• Rôle « ").append(user.getRole().getName()).append(" ».").append("\n")
-                .append("• Élément « ").append(user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2)).append(" ».").append("\n")
-        ;
+                .append("• Rôle « ").append(user.role().name()).append(" ».").append("\n")
+                .append("• Élément « ")
+                .append(user.elements().stream().map(ApiUser.ApiElementSummary::name).reduce((a, b) -> a + ", " + b).orElse("Ø"))
+                .append(" ».").append("\n");
 
         EmbedBuilder embedBuilder = EmbedUtils.createDefaultEmbed(event.getJDA())
                 .setTitle(event.getMember().getEffectiveName() + " vient d'être invoqué !")
@@ -59,11 +88,6 @@ public class GuildMemberJoinListener extends ListenerAdapter {
                 .setThumbnail(member.getUser().getEffectiveAvatarUrl())
                 .setTimestamp(event.getMember().getTimeJoined())
                 .setColor(color);
-
-
-        if (channel != null) {
-            channel.sendMessageEmbeds(embedBuilder.build()).queue();
-        }
-
+        channel.sendMessageEmbeds(embedBuilder.build()).queue();
     }
 }

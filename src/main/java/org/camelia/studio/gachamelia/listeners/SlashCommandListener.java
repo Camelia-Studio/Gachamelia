@@ -8,8 +8,8 @@ import org.camelia.studio.gachamelia.managers.CommandManager;
 public class SlashCommandListener extends ListenerAdapter {
     private final CommandManager commandManager;
 
-    public SlashCommandListener() {
-        commandManager = new CommandManager();
+    public SlashCommandListener(CommandManager commandManager) {
+        this.commandManager = commandManager;
         commandManager.registerCommands();
     }
 

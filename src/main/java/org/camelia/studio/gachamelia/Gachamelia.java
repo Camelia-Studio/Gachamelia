@@ -11,8 +11,10 @@ import org.camelia.studio.gachamelia.api.http.ApiTransport;
 import org.camelia.studio.gachamelia.api.http.JavaHttpApiTransport;
 import org.camelia.studio.gachamelia.db.HibernateConfig;
 import org.camelia.studio.gachamelia.listeners.ReadyListener;
+import org.camelia.studio.gachamelia.managers.CommandManager;
 import org.camelia.studio.gachamelia.managers.ListenerManager;
 import org.camelia.studio.gachamelia.services.BotEmojiScheduler;
+import org.camelia.studio.gachamelia.services.CatalogueMessageService;
 import org.camelia.studio.gachamelia.services.EmojiSnapshotService;
 import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
@@ -23,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.random.RandomGenerator;
 
 public class Gachamelia {
     private static JDA jda;
@@ -40,6 +43,8 @@ public class Gachamelia {
             BotApiService botApiService = new BotApiService(apiClient, catalogueCache, emojiSnapshotService);
             BotEmojiScheduler botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
             GuildEmojiRefreshDebouncer emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
+            CatalogueMessageService catalogueMessageService = new CatalogueMessageService(RandomGenerator.getDefault());
+            CommandManager commandManager = new CommandManager(botApiService, catalogueCache);
 
             jda = JDABuilder.createDefault(Configuration.getInstance().getDotenv().get("BOT_TOKEN"))
                     .addEventListeners(new ReadyListener(botApiService, botEmojiScheduler))
@@ -47,7 +52,13 @@ public class Gachamelia {
                     .build()
                     .awaitReady();
 
-            new ListenerManager().registerListeners(jda);
+            new ListenerManager(
+                    commandManager,
+                    botApiService,
+                    catalogueCache,
+                    catalogueMessageService,
+                    emojiRefreshDebouncer
+            ).registerListeners(jda);
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 emojiRefreshDebouncer.close();

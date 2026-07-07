@@ -1,13 +1,14 @@
 package org.camelia.studio.gachamelia.managers;
 
 
-import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import org.camelia.studio.gachamelia.Gachamelia;
+import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.commands.personnage.FichePersoCommand;
+import org.camelia.studio.gachamelia.commands.utils.PingCommand;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
-import org.camelia.studio.gachamelia.utils.Configuration;
-import org.camelia.studio.gachamelia.utils.ReflectionUtils;
+import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,24 +18,16 @@ public class CommandManager {
     private final List<ISlashCommand> slashCommands;
     private final Logger logger = LoggerFactory.getLogger(CommandManager.class);
 
-    public CommandManager() {
-        slashCommands = ReflectionUtils.loadClasses(
-                "org.camelia.studio.gachamelia.commands",
-                ISlashCommand.class
+    public CommandManager(BotApiService botApiService, GuildCatalogueCache catalogueCache) {
+        slashCommands = List.of(
+                new FichePersoCommand(botApiService, catalogueCache),
+                new PingCommand()
         );
     }
 
     public void registerCommands() {
-        Guild guild = Gachamelia
+        Gachamelia
                 .getJda()
-                .getGuildById(Configuration.getInstance().getDotenv().get("GUILD_ID"));
-
-        if (guild == null) {
-            logger.error("Impossible de trouver le serveur Discord");
-            return;
-        }
-
-        guild
                 .updateCommands()
                 .addCommands(
                         slashCommands
@@ -47,7 +40,7 @@ public class CommandManager {
                 .queue();
 
 
-        logger.info("Enregistrement de {} commandes", slashCommands.size());
+        logger.info("Enregistrement global de {} commandes", slashCommands.size());
     }
 
     public void handleCommand(String commandName, SlashCommandInteractionEvent event) {
@@ -60,4 +53,3 @@ public class CommandManager {
         event.getHook().editOriginal("Commande inconnue").queue();
     }
 }
-
