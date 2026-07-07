@@ -83,6 +83,9 @@ public class GachameliaApiClient {
             return transport.send(new ApiTransportRequest(method, configuration.apiUri(path), headers, requestBody));
         } catch (ApiException exception) {
             throw exception;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new ApiException(0, "request_failed", exception.getMessage());
         } catch (Exception exception) {
             throw new ApiException(0, "request_failed", exception.getMessage());
         }

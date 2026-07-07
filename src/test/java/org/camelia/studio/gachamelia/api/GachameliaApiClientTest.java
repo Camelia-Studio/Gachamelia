@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GachameliaApiClientTest {
     @Test
@@ -62,7 +63,25 @@ class GachameliaApiClientTest {
         assertThat(transport.requests.get(3).headers()).containsEntry("Authorization", "Bearer token-2");
     }
 
-    private static GachameliaApiClient client(CapturingTransport transport) {
+    @Test
+    void sendInterruptedExceptionRestoresInterruptFlagAndWrapsInRequestFailedApiException() {
+        GachameliaApiClient client = client(new InterruptingAfterTokenTransport(token("token-1")));
+
+        try {
+            assertThatThrownBy(() -> client.ensureUser("guild-1", "42"))
+                    .isInstanceOf(ApiException.class)
+                    .satisfies(exception -> {
+                        ApiException apiException = (ApiException) exception;
+                        assertThat(apiException.statusCode()).isEqualTo(0);
+                        assertThat(apiException.errorCode()).isEqualTo("request_failed");
+                    });
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static GachameliaApiClient client(ApiTransport transport) {
         ApiConfiguration configuration = new ApiConfiguration("https://example.test", "client", "secret");
         ApiTokenProvider tokenProvider = new ApiTokenProvider(
                 configuration,
@@ -95,6 +114,24 @@ class GachameliaApiClientTest {
         public ApiTransportResponse send(ApiTransportRequest request) {
             requests.add(request);
             return responses.get(index++);
+        }
+    }
+
+    static class InterruptingAfterTokenTransport implements ApiTransport {
+        private final ApiTransportResponse tokenResponse;
+        private boolean firstCallDone;
+
+        InterruptingAfterTokenTransport(ApiTransportResponse tokenResponse) {
+            this.tokenResponse = tokenResponse;
+        }
+
+        @Override
+        public ApiTransportResponse send(ApiTransportRequest request) throws InterruptedException {
+            if (!firstCallDone) {
+                firstCallDone = true;
+                return tokenResponse;
+            }
+            throw new InterruptedException("simulated interruption");
         }
     }
 }
