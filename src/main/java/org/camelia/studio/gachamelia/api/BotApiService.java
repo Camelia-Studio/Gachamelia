@@ -36,6 +36,21 @@ public class BotApiService {
     }
 
     private void validateCatalogue(String guildId, CatalogueEnvelope envelope) {
+        if (envelope == null) {
+            throw new ApiException(502, "catalogue_missing", "Catalogue response missing for guild " + guildId);
+        }
+        if (envelope.catalogue() == null) {
+            throw new ApiException(502, "catalogue_payload_missing", "Catalogue payload missing for guild " + guildId);
+        }
+        if (envelope.catalogue().ranks() == null) {
+            throw new ApiException(502, "catalogue_ranks_missing", "Catalogue ranks missing for guild " + guildId);
+        }
+        if (envelope.catalogue().roles() == null) {
+            throw new ApiException(502, "catalogue_roles_missing", "Catalogue roles missing for guild " + guildId);
+        }
+        if (envelope.catalogue().elements() == null) {
+            throw new ApiException(502, "catalogue_elements_missing", "Catalogue elements missing for guild " + guildId);
+        }
         if (envelope.catalogue().ranks().isEmpty()) {
             throw new ApiException(409, "rank_catalogue_empty", "Rank catalogue empty for guild " + guildId);
         }

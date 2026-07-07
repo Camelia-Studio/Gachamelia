@@ -28,8 +28,8 @@ import net.dv8tion.jda.api.requests.restaction.AuditableRestAction;
 import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import net.dv8tion.jda.api.requests.restaction.MessageCreateAction;
 import net.dv8tion.jda.api.requests.restaction.WebhookMessageEditAction;
-import org.camelia.studio.gachamelia.Gachamelia;
 import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.ApiException;
 import org.camelia.studio.gachamelia.api.dto.ApiCatalogue;
 import org.camelia.studio.gachamelia.api.dto.ApiDiscordServer;
 import org.camelia.studio.gachamelia.api.dto.ApiElement;
@@ -57,7 +57,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.awt.Color;
-import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -73,21 +72,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RuntimeListenersAndCommandsTest {
-    @AfterEach
-    void clearStaticJda() throws Exception {
-        Field field = Gachamelia.class.getDeclaredField("jda");
-        field.setAccessible(true);
-        field.set(null, null);
-    }
-
     @Test
-    void commandManagerRegistersGlobalCommands() throws Exception {
+    void commandManagerRegistersGlobalCommands() {
         List<Collection<? extends CommandData>> registeredCommands = new ArrayList<>();
-        setStaticJda(jdaForCommandRegistration(registeredCommands));
+        JDA jda = jdaForCommandRegistration(registeredCommands);
 
         CommandManager manager = new CommandManager(new RecordingBotApiService(sampleUserEnvelope()), catalogueCacheWith(sampleCatalogue("10", "11", "12")));
 
-        manager.registerCommands();
+        manager.registerCommands(jda);
 
         assertThat(registeredCommands).hasSize(1);
         assertThat(registeredCommands.getFirst())
@@ -116,6 +108,40 @@ class RuntimeListenersAndCommandsTest {
         assertThat(embed.getDescription()).contains("- Force : **7** (7 + 0)");
         assertThat(embed.getDescription()).contains("- Emblème : **<:comete:20>**");
         assertThat(capturedMessages.editedOriginalMessages).containsExactly("Fiche de personnage de Melaine");
+    }
+
+    @Test
+    void fichePersoEditsOriginalWhenApiFailsAfterDeferReply() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        botApiService.ensureUserFailure = new ApiException(502, "api_user_missing", "boom");
+        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
+        FichePersoCommand command = new FichePersoCommand(botApiService, cache);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+        SlashCommandInteractionEvent event = slashCommandEvent("ficheperso", guild, member, null, capturedMessages);
+
+        command.execute(event);
+
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+        assertThat(capturedMessages.editedOriginalMessages).containsExactly("La fiche de personnage n'a pas pu être chargée");
+    }
+
+    @Test
+    void fichePersoEditsOriginalWhenCatalogueCacheIsMissingAfterDeferReply() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        FichePersoCommand command = new FichePersoCommand(botApiService, new GuildCatalogueCache());
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+        SlashCommandInteractionEvent event = slashCommandEvent("ficheperso", guild, member, null, capturedMessages);
+
+        command.execute(event);
+
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+        assertThat(capturedMessages.editedOriginalMessages).containsExactly("La fiche de personnage n'a pas pu être chargée");
     }
 
     @Test
@@ -240,12 +266,6 @@ class RuntimeListenersAndCommandsTest {
         GuildCatalogueCache cache = new GuildCatalogueCache();
         cache.put("guild-1", envelope);
         return cache;
-    }
-
-    private static void setStaticJda(JDA jda) throws Exception {
-        Field field = Gachamelia.class.getDeclaredField("jda");
-        field.setAccessible(true);
-        field.set(null, jda);
     }
 
     private static JDA jdaForCommandRegistration(List<Collection<? extends CommandData>> registeredCommands) {
@@ -558,6 +578,7 @@ class RuntimeListenersAndCommandsTest {
         private int ensureStaffUserCalls;
         private String lastEnsureGuildId;
         private String lastEnsureUserId;
+        private RuntimeException ensureUserFailure;
 
         private RecordingBotApiService(UserEnvelope envelope) {
             super(null, null, null);
@@ -566,6 +587,9 @@ class RuntimeListenersAndCommandsTest {
 
         @Override
         public UserEnvelope ensureUser(String guildId, String userDiscordId) {
+            if (ensureUserFailure != null) {
+                throw ensureUserFailure;
+            }
             ensureUserCalls++;
             lastEnsureGuildId = guildId;
             lastEnsureUserId = userDiscordId;

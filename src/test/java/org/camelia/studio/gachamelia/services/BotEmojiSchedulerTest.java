@@ -48,25 +48,24 @@ class BotEmojiSchedulerTest {
     @Test
     void failedSynchronousStartupDoesNotPermanentlyMarkSchedulerAsStarted() {
         RecordingScheduledExecutor executor = new RecordingScheduledExecutor();
-        executor.failOnSchedule(new IllegalStateException("boom"));
-        CountingApiClient apiClient = new CountingApiClient(false);
+        CountingApiClient apiClient = new CountingApiClient(true);
 
         try (BotEmojiScheduler scheduler = new BotEmojiScheduler(apiClient, new EmojiSnapshotService(), executor)) {
             assertThatThrownBy(() -> scheduler.start(jdaReturning(List.of(applicationEmoji("10", "ambre", false, true)))))
                     .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("boom");
+                    .hasMessage("refresh failed");
 
-            executor.failOnSchedule(null);
+            apiClient.failRefresh = false;
 
             scheduler.start(jdaReturning(List.of(applicationEmoji("20", "gachamelia", true, true))));
 
-            assertThat(executor.scheduleAtFixedRateCalls()).isEqualTo(2);
+            assertThat(executor.scheduleAtFixedRateCalls()).isEqualTo(1);
             assertThat(apiClient.refreshCalls()).isEqualTo(2);
         }
     }
 
     @Test
-    void refreshBotEmojisHandlesApiClientExceptionsThrownFromSuccessCallback() {
+    void refreshBotEmojisHandlesApiClientExceptionsBestEffort() {
         CountingApiClient apiClient = new CountingApiClient(true);
 
         try (BotEmojiScheduler scheduler = new BotEmojiScheduler(apiClient, new EmojiSnapshotService(), new RecordingScheduledExecutor())) {
@@ -126,7 +125,7 @@ class BotEmojiSchedulerTest {
 
     private static final class CountingApiClient extends GachameliaApiClient {
         private final AtomicInteger refreshCalls = new AtomicInteger();
-        private final boolean failRefresh;
+        private volatile boolean failRefresh;
 
         private CountingApiClient(boolean failRefresh) {
             super(

@@ -1,11 +1,9 @@
 package org.camelia.studio.gachamelia.listeners;
 
-import jakarta.annotation.Nonnull;
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Role;
-import net.dv8tion.jda.api.events.session.ReadyEvent;
-import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.camelia.studio.gachamelia.api.ApiException;
 import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.api.dto.ApiDiscordServer;
@@ -18,7 +16,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
-public class ReadyListener extends ListenerAdapter {
+public class ReadyListener {
     private static final Logger logger = LoggerFactory.getLogger(ReadyListener.class);
 
     private final BotApiService botApiService;
@@ -29,14 +27,14 @@ public class ReadyListener extends ListenerAdapter {
         this.botEmojiScheduler = botEmojiScheduler;
     }
 
-    @Override
-    public void onReady(@Nonnull ReadyEvent event) {
-        logger.info("Connecté en tant que {}", event.getJDA().getSelfUser().getAsTag());
-        botEmojiScheduler.start(event.getJDA());
+    public void initialize(JDA jda) {
+        logger.info("Connecté en tant que {}", jda.getSelfUser().getAsTag());
+        botEmojiScheduler.start(jda);
 
-        for (Guild guild : event.getJDA().getGuilds()) {
+        for (Guild guild : jda.getGuilds()) {
             CatalogueEnvelope catalogue = botApiService.initializeGuild(guild);
-            guild.loadMembers().onSuccess(members -> initializeMembers(guild, catalogue, members));
+            List<Member> members = guild.loadMembers().get();
+            initializeMembers(guild, catalogue, members);
         }
     }
 

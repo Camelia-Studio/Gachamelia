@@ -29,28 +29,38 @@ import java.util.random.RandomGenerator;
 
 public class Gachamelia {
     private static final Logger logger = LoggerFactory.getLogger(Gachamelia.class);
-    private static JDA jda;
+    private static final Duration API_CONNECT_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration API_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
     public static void main(String[] args) {
+        JDA jda = null;
+        BotEmojiScheduler botEmojiScheduler = null;
+        GuildEmojiRefreshDebouncer emojiRefreshDebouncer = null;
+
         try {
             Configuration.getInstance();
             ApiConfiguration apiConfiguration = ApiConfiguration.from(Configuration.getInstance());
-            ApiTransport apiTransport = new JavaHttpApiTransport(HttpClient.newHttpClient());
+            HttpClient httpClient = HttpClient.newBuilder()
+                    .connectTimeout(API_CONNECT_TIMEOUT)
+                    .build();
+            ApiTransport apiTransport = new JavaHttpApiTransport(httpClient, API_REQUEST_TIMEOUT);
             ApiTokenProvider tokenProvider = new ApiTokenProvider(apiConfiguration, apiTransport, Clock.systemUTC());
             GachameliaApiClient apiClient = new GachameliaApiClient(apiConfiguration, tokenProvider, apiTransport);
             GuildCatalogueCache catalogueCache = new GuildCatalogueCache();
             EmojiSnapshotService emojiSnapshotService = new EmojiSnapshotService();
             BotApiService botApiService = new BotApiService(apiClient, catalogueCache, emojiSnapshotService);
-            BotEmojiScheduler botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
-            GuildEmojiRefreshDebouncer emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
+            botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
+            emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
             CatalogueMessageService catalogueMessageService = new CatalogueMessageService(RandomGenerator.getDefault());
             CommandManager commandManager = new CommandManager(botApiService, catalogueCache);
+            ReadyListener readyListener = new ReadyListener(botApiService, botEmojiScheduler);
 
             jda = JDABuilder.createDefault(Configuration.getInstance().getDotenv().get("BOT_TOKEN"))
-                    .addEventListeners(new ReadyListener(botApiService, botEmojiScheduler))
                     .enableIntents(GatewayIntent.getIntents(GatewayIntent.ALL_INTENTS))
                     .build()
                     .awaitReady();
+
+            readyListener.initialize(jda);
 
             new ListenerManager(
                     commandManager,
@@ -60,30 +70,39 @@ public class Gachamelia {
                     emojiRefreshDebouncer
             ).registerListeners(jda);
 
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda)));
+            JDA readyJda = jda;
+            BotEmojiScheduler readyBotEmojiScheduler = botEmojiScheduler;
+            GuildEmojiRefreshDebouncer readyEmojiRefreshDebouncer = emojiRefreshDebouncer;
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(readyBotEmojiScheduler, readyEmojiRefreshDebouncer, readyJda)));
         } catch (InterruptedException e) {
+            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
             Thread.currentThread().interrupt();
             logger.error("Le thread a été interrompu : {}", e.getMessage());
             System.exit(1);
         } catch (IllegalArgumentException exception) {
+            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
             logger.error("Configuration invalide : {}", exception.getMessage());
             System.exit(1);
         } catch (ApiException exception) {
+            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
             logger.error("Erreur API au démarrage : {} ({})", exception.errorCode(), exception.statusCode());
             System.exit(1);
         } catch (Exception e) {
+            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
             logger.error("Une erreur est survenue lors de l'exécution du bot : {}", e.getMessage());
             System.exit(1);
         }
     }
 
     static void shutdown(BotEmojiScheduler botEmojiScheduler, GuildEmojiRefreshDebouncer emojiRefreshDebouncer, JDA jda) {
-        botEmojiScheduler.close();
-        emojiRefreshDebouncer.close();
-        jda.shutdown();
-    }
-
-    public static JDA getJda() {
-        return jda;
+        if (botEmojiScheduler != null) {
+            botEmojiScheduler.close();
+        }
+        if (emojiRefreshDebouncer != null) {
+            emojiRefreshDebouncer.close();
+        }
+        if (jda != null) {
+            jda.shutdown();
+        }
     }
 }

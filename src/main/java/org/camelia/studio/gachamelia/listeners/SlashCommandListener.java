@@ -10,7 +10,6 @@ public class SlashCommandListener extends ListenerAdapter {
 
     public SlashCommandListener(CommandManager commandManager) {
         this.commandManager = commandManager;
-        commandManager.registerCommands();
     }
 
 

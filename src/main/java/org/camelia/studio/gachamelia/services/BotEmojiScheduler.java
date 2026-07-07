@@ -35,7 +35,7 @@ public class BotEmojiScheduler implements AutoCloseable {
         }
 
         try {
-            refreshBotEmojis(jda);
+            refreshBotEmojisOrThrow(jda);
             executor.scheduleAtFixedRate(() -> refreshBotEmojis(jda), 1, 1, TimeUnit.HOURS);
         } catch (RuntimeException | Error exception) {
             started.set(false);
@@ -44,16 +44,15 @@ public class BotEmojiScheduler implements AutoCloseable {
     }
 
     public void refreshBotEmojis(JDA jda) {
-        jda.retrieveApplicationEmojis().queue(
-                emojis -> {
-                    try {
-                        apiClient.refreshEmojis(snapshotService.botSnapshot(emojis));
-                    } catch (Exception exception) {
-                        logger.warn("Impossible de rafraîchir les emojis bot", exception);
-                    }
-                },
-                error -> logger.warn("Impossible de rafraîchir les emojis bot", error)
-        );
+        try {
+            refreshBotEmojisOrThrow(jda);
+        } catch (RuntimeException exception) {
+            logger.warn("Impossible de rafraîchir les emojis bot", exception);
+        }
+    }
+
+    private void refreshBotEmojisOrThrow(JDA jda) {
+        apiClient.refreshEmojis(snapshotService.botSnapshot(jda.retrieveApplicationEmojis().complete()));
     }
 
     @Override

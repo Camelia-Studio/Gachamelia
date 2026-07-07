@@ -2,8 +2,8 @@ package org.camelia.studio.gachamelia.managers;
 
 
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import org.camelia.studio.gachamelia.Gachamelia;
 import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.commands.personnage.FichePersoCommand;
 import org.camelia.studio.gachamelia.commands.utils.PingCommand;
@@ -25,9 +25,8 @@ public class CommandManager {
         );
     }
 
-    public void registerCommands() {
-        Gachamelia
-                .getJda()
+    public void registerCommands(JDA jda) {
+        jda
                 .updateCommands()
                 .addCommands(
                         slashCommands

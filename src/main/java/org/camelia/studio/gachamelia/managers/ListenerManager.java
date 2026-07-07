@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ListenerManager {
+    private final CommandManager commandManager;
     private final List<ListenerAdapter> listener;
     private final Logger logger = LoggerFactory.getLogger(ListenerManager.class.getName());
 
@@ -28,6 +29,7 @@ public class ListenerManager {
             CatalogueMessageService messageService,
             GuildEmojiRefreshDebouncer emojiRefreshDebouncer
     ) {
+        this.commandManager = commandManager;
         listener = new ArrayList<>();
 
         addListener(new SlashCommandListener(commandManager));
@@ -38,6 +40,8 @@ public class ListenerManager {
     }
 
     public void registerListeners(JDA jda) {
+        commandManager.registerCommands(jda);
+
         for (ListenerAdapter listenerAdapter : listener) {
             jda.addEventListener(listenerAdapter);
 
