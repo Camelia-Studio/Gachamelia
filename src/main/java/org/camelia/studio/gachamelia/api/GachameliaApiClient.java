@@ -34,6 +34,10 @@ public class GachameliaApiClient {
         return sendAuthorized("POST", "/discord-servers", request, DiscordServerEnvelope.class, true);
     }
 
+    public DiscordServerEnvelope deactivateServer(String guildId) {
+        return sendAuthorized("DELETE", "/discord-servers/" + encode(guildId), null, DiscordServerEnvelope.class, true);
+    }
+
     public EmojiSnapshotResponse refreshEmojis(EmojiSnapshotRequest request) {
         return sendAuthorized("PUT", "/discord-emojis", request, EmojiSnapshotResponse.class, true);
     }

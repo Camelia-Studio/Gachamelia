@@ -16,6 +16,25 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GachameliaApiClientTest {
     @Test
+    void deactivateServerSendsDeleteWithoutBody() {
+        CapturingTransport transport = new CapturingTransport(
+                token("token-1"),
+                new ApiTransportResponse(200, """
+                        {"server":{"discord_id":"guild-1","name":"Guild","icon":null,
+                        "lifecycle":{"active":false,"last_seen_at":"2026-07-22T14:30:00+00:00","inactive_at":"2026-07-22T16:45:00+00:00"},
+                        "settings":{"welcome_channel_id":null,"bye_channel_id":null,"staff_role_id":null}}}
+                        """)
+        );
+
+        client(transport).deactivateServer("guild-1");
+
+        ApiTransportRequest request = transport.requests.get(1);
+        assertThat(request.method()).isEqualTo("DELETE");
+        assertThat(request.uri().toString()).isEqualTo("https://example.test/api/discord-servers/guild-1");
+        assertThat(request.body()).isNull();
+    }
+
+    @Test
     void ensureUserSendsExactlyEmptyObject() {
         CapturingTransport transport = new CapturingTransport(
                 token("token-1"),
