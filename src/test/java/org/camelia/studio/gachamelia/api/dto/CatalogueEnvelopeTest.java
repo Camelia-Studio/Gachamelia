@@ -15,11 +15,21 @@ class CatalogueEnvelopeTest {
                     "discord_id": "123",
                     "name": "Dev-Bots",
                     "icon": null,
+                    "lifecycle": {
+                      "active": true,
+                      "last_seen_at": "2026-07-22T14:30:00+00:00",
+                      "inactive_at": null
+                    },
                     "settings": {
                       "welcome_channel_id": "10",
                       "bye_channel_id": "11",
                       "staff_role_id": "12"
                     }
+                  },
+                  "validation": {
+                    "ready": false,
+                    "errors": ["role_catalogue_empty"],
+                    "warnings": ["welcome_channel_not_configured"]
                   },
                   "catalogue": {
                     "ranks": [{
@@ -52,9 +62,15 @@ class CatalogueEnvelopeTest {
         CatalogueEnvelope envelope = mapper.readValue(json, CatalogueEnvelope.class);
 
         assertThat(envelope.server().discordId()).isEqualTo("123");
+        assertThat(envelope.server().lifecycle().active()).isTrue();
+        assertThat(envelope.server().lifecycle().lastSeenAt()).isEqualTo("2026-07-22T14:30:00+00:00");
+        assertThat(envelope.server().lifecycle().inactiveAt()).isNull();
         assertThat(envelope.server().settings().welcomeChannelId()).isEqualTo("10");
         assertThat(envelope.server().settings().byeChannelId()).isEqualTo("11");
         assertThat(envelope.server().settings().staffRoleId()).isEqualTo("12");
+        assertThat(envelope.validation().ready()).isFalse();
+        assertThat(envelope.validation().errors()).containsExactly("role_catalogue_empty");
+        assertThat(envelope.validation().warnings()).containsExactly("welcome_channel_not_configured");
         assertThat(envelope.catalogue().ranks()).hasSize(1);
         assertThat(envelope.catalogue().ranks().getFirst().welcomeMessages().getFirst().message())
                 .isEqualTo("Bienvenue %username%.");
