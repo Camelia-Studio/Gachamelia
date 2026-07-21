@@ -32,6 +32,33 @@ class GuildCatalogueCacheTest {
     }
 
     @Test
+    void putReturnsPreviousCatalogueAtomically() {
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        CatalogueEnvelope first = envelope("guild-1", false);
+        CatalogueEnvelope second = envelope("guild-1", true);
+
+        assertThat(cache.put("guild-1", first)).isNull();
+        assertThat(cache.put("guild-1", second)).isSameAs(first);
+        assertThat(cache.find("guild-1")).containsSame(second);
+    }
+
+    @Test
+    void findReadyOnlyReturnsReadyCatalogue() {
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        cache.put("guild-1", envelope("guild-1", false));
+
+        assertThat(cache.findReady("guild-1")).isEmpty();
+        assertThatThrownBy(() -> cache.requireReady("guild-1"))
+                .isInstanceOfSatisfying(GuildNotReadyException.class, exception -> {
+                    assertThat(exception.guildId()).isEqualTo("guild-1");
+                    assertThat(exception).hasMessageContaining("guild-1");
+                });
+
+        cache.put("guild-1", envelope("guild-1", true));
+        assertThat(cache.findReady("guild-1")).containsSame(cache.find("guild-1").orElseThrow());
+    }
+
+    @Test
     void removeDeletesStoredCatalogue() {
         GuildCatalogueCache cache = new GuildCatalogueCache();
         cache.put("guild-1", envelope("guild-1"));
@@ -42,8 +69,13 @@ class GuildCatalogueCacheTest {
     }
 
     private CatalogueEnvelope envelope(String guildId) {
+        return envelope(guildId, true);
+    }
+
+    private CatalogueEnvelope envelope(String guildId, boolean ready) {
         return new CatalogueEnvelope(
                 new ApiDiscordServer(guildId, "Guild", null, null),
+                new org.camelia.studio.gachamelia.api.dto.ApiCatalogueValidation(ready, List.of(), List.of()),
                 new ApiCatalogue(List.of(), List.of(), List.of(), List.of())
         );
     }

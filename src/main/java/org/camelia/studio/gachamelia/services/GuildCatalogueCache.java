@@ -9,12 +9,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GuildCatalogueCache {
     private final Map<String, CatalogueEnvelope> catalogues = new ConcurrentHashMap<>();
 
-    public void put(String guildId, CatalogueEnvelope envelope) {
-        catalogues.put(guildId, envelope);
+    public CatalogueEnvelope put(String guildId, CatalogueEnvelope envelope) {
+        return catalogues.put(guildId, envelope);
     }
 
     public Optional<CatalogueEnvelope> find(String guildId) {
         return Optional.ofNullable(catalogues.get(guildId));
+    }
+
+    public Optional<CatalogueEnvelope> findReady(String guildId) {
+        return find(guildId).filter(envelope ->
+                envelope.validation() != null && envelope.validation().ready()
+        );
     }
 
     public void remove(String guildId) {
@@ -27,5 +33,9 @@ public class GuildCatalogueCache {
             throw new IllegalStateException("Catalogue missing for guild " + guildId);
         }
         return envelope;
+    }
+
+    public CatalogueEnvelope requireReady(String guildId) {
+        return findReady(guildId).orElseThrow(() -> new GuildNotReadyException(guildId));
     }
 }
