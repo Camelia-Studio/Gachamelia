@@ -37,6 +37,50 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class MemberReconciliationServiceTest {
     @Test
+    void requestAfterCloseDoesNotLoadMembers() {
+        RecordingBotApiService api = new RecordingBotApiService();
+        GuildCatalogueCache cache = readyCache("guild-1", null);
+        ControlledMemberTask task = new ControlledMemberTask();
+        ManualExecutorService executor = new ManualExecutorService();
+        MemberReconciliationService service = service(api, cache, false, executor, ignored -> { });
+        Guild guild = guild("guild-1", task, Map.of(), new ArrayList<>());
+
+        service.close();
+        service.request(guild);
+
+        assertThat(task.loadCount()).isZero();
+        assertThat(api.userIds()).isEmpty();
+    }
+
+    @Test
+    void callbackOverlappingCloseCannotSubmitMemberWork() throws InterruptedException {
+        RecordingBotApiService api = new RecordingBotApiService();
+        GuildCatalogueCache cache = readyCache("guild-1", null);
+        ControlledMemberTask task = new ControlledMemberTask();
+        ManualExecutorService executor = new ManualExecutorService();
+        MemberReconciliationService service = service(api, cache, false, executor, ignored -> { });
+        Guild guild = guild("guild-1", task, Map.of(), new ArrayList<>());
+        CountDownLatch botCheckStarted = new CountDownLatch(1);
+        CountDownLatch releaseBotCheck = new CountDownLatch(1);
+        Member member = member("human", false, List.of(), () -> {
+            botCheckStarted.countDown();
+            await(releaseBotCheck);
+        });
+
+        service.request(guild);
+        Thread callback = Thread.ofPlatform().start(() -> task.succeed(List.of(member)));
+        assertThat(botCheckStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+        service.close();
+        releaseBotCheck.countDown();
+        callback.join(2_000);
+
+        assertThat(callback.isAlive()).isFalse();
+        assertThat(api.userIds()).isEmpty();
+        assertThat(executor.pendingTaskCount()).isZero();
+    }
+
+    @Test
     void requestUsesAsyncMemberCallbackAndSkipsBotsByDefault() {
         RecordingBotApiService api = new RecordingBotApiService();
         GuildCatalogueCache cache = readyCache("guild-1", null);
@@ -85,7 +129,7 @@ class MemberReconciliationServiceTest {
     @Test
     void requestsAcrossGuildsNeverExceedGlobalConcurrency() throws InterruptedException {
         RecordingBotApiService api = new RecordingBotApiService();
-        api.blockCalls(2);
+        api.blockCalls(2, 4);
         GuildCatalogueCache cache = readyCache("guild-1", null);
         cache.put("guild-2", readyEnvelope(null));
         ControlledMemberTask firstTask = new ControlledMemberTask();
@@ -103,7 +147,7 @@ class MemberReconciliationServiceTest {
             assertThat(api.maximumConcurrency()).isLessThanOrEqualTo(2);
 
             api.releaseCalls();
-            assertThat(api.awaitCompletedCalls(4)).isTrue();
+            assertThat(api.awaitCompletedCalls()).isTrue();
             assertThat(api.maximumConcurrency()).isLessThanOrEqualTo(2);
         } finally {
             api.releaseCalls();
@@ -200,6 +244,16 @@ class MemberReconciliationServiceTest {
     }
 
     @Test
+    void cancelWinningImmediatelyBeforeEnsurePreventsApiCall() throws Exception {
+        assertInvalidationBeforeEnsurePreventsApiCall((service, cache) -> service.cancel("guild-1"));
+    }
+
+    @Test
+    void catalogueTurningUnreadyImmediatelyBeforeEnsurePreventsApiCall() throws Exception {
+        assertInvalidationBeforeEnsurePreventsApiCall((service, cache) -> cache.put("guild-1", unreadyEnvelope("staff-role")));
+    }
+
+    @Test
     void recoverableMemberFailureRequestsRecoveryOnceAndAbortsUnstartedTasks() {
         RecordingBotApiService api = new RecordingBotApiService();
         api.failFirstCallWith(new ApiException(409, "server_inactive", "inactive"));
@@ -217,6 +271,29 @@ class MemberReconciliationServiceTest {
                     member("second", false, List.of()),
                     member("third", false, List.of())
             ));
+            executor.runAll();
+
+            assertThat(api.userIds()).containsExactly("first");
+            assertThat(recoveryGuilds).containsExactly("guild-1");
+        } finally {
+            service.close();
+        }
+    }
+
+    @Test
+    void serverNotFoundRequestsRecoveryOnceAndAbortsUnstartedTasks() {
+        RecordingBotApiService api = new RecordingBotApiService();
+        api.failFirstCallWith(new ApiException(404, "server_not_found", "missing"));
+        GuildCatalogueCache cache = readyCache("guild-1", null);
+        ControlledMemberTask task = new ControlledMemberTask();
+        ManualExecutorService executor = new ManualExecutorService();
+        List<String> recoveryGuilds = new ArrayList<>();
+        MemberReconciliationService service = service(api, cache, false, executor, guild -> recoveryGuilds.add(guild.getId()));
+        Guild guild = guild("guild-1", task, Map.of(), new ArrayList<>());
+
+        try {
+            service.request(guild);
+            task.succeed(List.of(member("first", false, List.of()), member("second", false, List.of())));
             executor.runAll();
 
             assertThat(api.userIds()).containsExactly("first");
@@ -288,6 +365,45 @@ class MemberReconciliationServiceTest {
         return new MemberReconciliationService(api, cache, syncBotMembers, recoveryRequest, executor);
     }
 
+    private static void assertInvalidationBeforeEnsurePreventsApiCall(
+            Invalidation invalidation
+    ) throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService();
+        GuildCatalogueCache cache = readyCache("guild-1", "staff-role");
+        ControlledMemberTask task = new ControlledMemberTask();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        CountDownLatch roleLookupStarted = new CountDownLatch(1);
+        CountDownLatch releaseRoleLookup = new CountDownLatch(1);
+        Role staffRole = role("staff-role");
+        Guild guild = guild(
+                "guild-1",
+                task,
+                Map.of("staff-role", staffRole),
+                new ArrayList<>(),
+                ignored -> {
+                    roleLookupStarted.countDown();
+                    await(releaseRoleLookup);
+                }
+        );
+        MemberReconciliationService service = service(api, cache, false, executor, ignored -> { });
+
+        try {
+            service.request(guild);
+            task.succeed(List.of(member("human", false, List.of(staffRole))));
+            assertThat(roleLookupStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+            invalidation.run(service, cache);
+            releaseRoleLookup.countDown();
+            executor.submit(() -> { }).get(2, TimeUnit.SECONDS);
+
+            assertThat(api.userIds()).isEmpty();
+            assertThat(api.staffUserIds()).isEmpty();
+        } finally {
+            releaseRoleLookup.countDown();
+            service.close();
+        }
+    }
+
     private static GuildCatalogueCache readyCache(String guildId, String staffRoleId) {
         GuildCatalogueCache cache = new GuildCatalogueCache();
         cache.put(guildId, readyEnvelope(staffRoleId));
@@ -316,12 +432,26 @@ class MemberReconciliationServiceTest {
             Map<String, Role> roles,
             List<String> assignments
     ) {
+        return guild(guildId, members, roles, assignments, ignored -> { });
+    }
+
+    private static Guild guild(
+            String guildId,
+            ControlledMemberTask members,
+            Map<String, Role> roles,
+            List<String> assignments,
+            Consumer<String> beforeRoleLookup
+    ) {
         return proxy(
                 Guild.class,
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getId" -> guildId;
                     case "loadMembers" -> members.load();
-                    case "getRoleById" -> roles.get(String.valueOf(args[0]));
+                    case "getRoleById" -> {
+                        String roleId = String.valueOf(args[0]);
+                        beforeRoleLookup.accept(roleId);
+                        yield roles.get(roleId);
+                    }
                     case "addRoleToMember" -> auditableRestAction(() -> assignments.add(
                             ((Member) args[0]).getId() + "->" + ((Role) args[1]).getId()
                     ));
@@ -332,12 +462,19 @@ class MemberReconciliationServiceTest {
     }
 
     private static Member member(String id, boolean bot, List<Role> roles) {
+        return member(id, bot, roles, () -> { });
+    }
+
+    private static Member member(String id, boolean bot, List<Role> roles, Runnable beforeBotCheck) {
         User user = proxy(
                 User.class,
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getId" -> id;
                     case "getAsTag" -> id + "#0001";
-                    case "isBot" -> bot;
+                    case "isBot" -> {
+                        beforeBotCheck.run();
+                        yield bot;
+                    }
                     case "toString" -> "User[" + id + "]";
                     default -> defaultSnowflakeOrUnsupported(method.getName());
                 }
@@ -412,6 +549,22 @@ class MemberReconciliationServiceTest {
         return null;
     }
 
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(2, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for test latch");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    @FunctionalInterface
+    private interface Invalidation {
+        void run(MemberReconciliationService service, GuildCatalogueCache cache);
+    }
+
     @SuppressWarnings("unchecked")
     private static final class ControlledMemberTask {
         private final Task<List<Member>> task;
@@ -480,10 +633,10 @@ class MemberReconciliationServiceTest {
             super(null, null, null);
         }
 
-        private void blockCalls(int expectedCalls) {
-            blockedCalls = new CountDownLatch(expectedCalls);
+        private void blockCalls(int expectedBlockedCalls, int expectedCompletedCalls) {
+            blockedCalls = new CountDownLatch(expectedBlockedCalls);
             releaseCalls = new CountDownLatch(1);
-            completedCalls = new CountDownLatch(4);
+            completedCalls = new CountDownLatch(expectedCompletedCalls);
         }
 
         private boolean awaitBlockedCalls() throws InterruptedException {
@@ -497,7 +650,7 @@ class MemberReconciliationServiceTest {
             }
         }
 
-        private boolean awaitCompletedCalls(int expectedCalls) throws InterruptedException {
+        private boolean awaitCompletedCalls() throws InterruptedException {
             CountDownLatch latch = completedCalls;
             return latch != null && latch.await(2, TimeUnit.SECONDS);
         }
@@ -614,6 +767,10 @@ class MemberReconciliationServiceTest {
             while (!tasks.isEmpty()) {
                 tasks.removeFirst().run();
             }
+        }
+
+        private int pendingTaskCount() {
+            return tasks.size();
         }
     }
 }

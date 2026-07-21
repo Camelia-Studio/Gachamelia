@@ -20,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 
 public class MemberReconciliationService implements AutoCloseable {
@@ -31,6 +32,8 @@ public class MemberReconciliationService implements AutoCloseable {
     private final Consumer<Guild> recoveryRequest;
     private final ExecutorService executor;
     private final Map<String, ReconciliationState> states = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private final ReentrantReadWriteLock closeLock = new ReentrantReadWriteLock();
 
     public MemberReconciliationService(
             BotApiService botApiService,
@@ -62,66 +65,107 @@ public class MemberReconciliationService implements AutoCloseable {
     }
 
     public void request(Guild guild) {
+        if (closed.get()) {
+            return;
+        }
         String guildId = guild.getId();
         while (true) {
-            ReconciliationState state = states.computeIfAbsent(guildId, ignored -> new ReconciliationState());
-            boolean startRun = false;
-            synchronized (state) {
-                if (!isCurrent(guildId, state)) {
-                    continue;
+            closeLock.readLock().lock();
+            try {
+                if (closed.get()) {
+                    return;
                 }
-                if (state.running) {
-                    state.trailingRequested = true;
-                } else {
-                    state.running = true;
-                    startRun = true;
+                ReconciliationState state = states.computeIfAbsent(guildId, ignored -> new ReconciliationState());
+                boolean startRun = false;
+                synchronized (state) {
+                    if (!isCurrent(guildId, state)) {
+                        continue;
+                    }
+                    if (state.running) {
+                        state.trailingRequested = true;
+                    } else {
+                        state.running = true;
+                        startRun = true;
+                    }
                 }
+                if (startRun) {
+                    startRun(guild, state);
+                }
+                return;
+            } finally {
+                closeLock.readLock().unlock();
             }
-            if (startRun) {
-                startRun(guild, state);
-            }
-            return;
         }
     }
 
     public void cancel(String guildId) {
-        ReconciliationState state = states.remove(guildId);
+        ReconciliationState state = states.get(guildId);
         if (state == null) {
             return;
         }
-        synchronized (state) {
-            state.cancelled = true;
-            state.trailingRequested = false;
-            state.running = false;
+        state.apiCallLock.writeLock().lock();
+        try {
+            if (!states.remove(guildId, state)) {
+                return;
+            }
+            synchronized (state) {
+                state.cancelled = true;
+                state.trailingRequested = false;
+                state.running = false;
+            }
+        } finally {
+            state.apiCallLock.writeLock().unlock();
         }
     }
 
     @Override
     public void close() {
-        states.forEach((guildId, state) -> cancel(guildId));
-        executor.shutdownNow();
+        closeLock.writeLock().lock();
+        try {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            List.copyOf(states.keySet()).forEach(this::cancel);
+            executor.shutdownNow();
+        } finally {
+            closeLock.writeLock().unlock();
+        }
     }
 
     private void startRun(Guild guild, ReconciliationState state) {
-        if (!isCurrent(guild.getId(), state)) {
+        if (closed.get()) {
             return;
         }
+        closeLock.readLock().lock();
         try {
+            if (closed.get() || !isCurrent(guild.getId(), state)) {
+                return;
+            }
             guild.loadMembers()
-                    .onSuccess(members -> submitMembers(guild, state, members))
+                    .onSuccess(members -> {
+                        if (!closed.get()) {
+                            submitMembers(guild, state, members);
+                        }
+                    })
                     .onError(error -> {
-                        logger.warn("Impossible de charger les membres du serveur {}", guild.getId(), error);
-                        finishRun(guild, state);
+                        if (!closed.get()) {
+                            logger.warn("Impossible de charger les membres du serveur {}", guild.getId(), error);
+                            finishRun(guild, state);
+                        }
                     });
         } catch (RuntimeException exception) {
-            logger.warn("Impossible de démarrer le chargement des membres du serveur {}", guild.getId(), exception);
-            finishRun(guild, state);
+            if (!closed.get()) {
+                logger.warn("Impossible de démarrer le chargement des membres du serveur {}", guild.getId(), exception);
+                finishRun(guild, state);
+            }
+        } finally {
+            closeLock.readLock().unlock();
         }
     }
 
     private void submitMembers(Guild guild, ReconciliationState state, List<Member> members) {
         String guildId = guild.getId();
-        if (!isCurrent(guildId, state) || catalogueCache.findReady(guildId).isEmpty()) {
+        if (closed.get() || !isCurrent(guildId, state) || catalogueCache.findReady(guildId).isEmpty()) {
             finishRun(guild, state);
             return;
         }
@@ -129,7 +173,7 @@ public class MemberReconciliationService implements AutoCloseable {
         List<Member> eligibleMembers = members.stream()
                 .filter(member -> syncBotMembers || !member.getUser().isBot())
                 .toList();
-        if (eligibleMembers.isEmpty()) {
+        if (closed.get() || eligibleMembers.isEmpty()) {
             finishRun(guild, state);
             return;
         }
@@ -148,15 +192,13 @@ public class MemberReconciliationService implements AutoCloseable {
     private void reconcileMember(Guild guild, ReconciliationState state, ReconciliationRun run, Member member) {
         try {
             String guildId = guild.getId();
-            if (!isCurrent(guildId, state) || run.abortRequested.get() || catalogueCache.findReady(guildId).isEmpty()) {
+            if (closed.get() || !isCurrent(guildId, state) || run.abortRequested.get()) {
                 return;
             }
 
             CatalogueEnvelope catalogue = catalogueCache.findReady(guildId).orElseThrow();
-            UserEnvelope envelope = isStaffMember(guild, member, catalogue)
-                    ? botApiService.ensureStaffUser(guildId, member.getId())
-                    : botApiService.ensureUser(guildId, member.getId());
-            addRankRole(guild, member, envelope);
+            boolean staffMember = isStaffMember(guild, member, catalogue);
+            reconcileMemberUnderGuards(guild, state, run, member, staffMember);
         } catch (ApiException exception) {
             if (isRecoverable(exception) && run.recoveryRequested.compareAndSet(false, true)) {
                 run.abortRequested.set(true);
@@ -172,6 +214,33 @@ public class MemberReconciliationService implements AutoCloseable {
             logger.warn("Impossible de réconcilier le membre {} du serveur {}", member.getId(), guild.getId(), exception);
         } finally {
             finishMember(guild, state, run);
+        }
+    }
+
+    private void reconcileMemberUnderGuards(
+            Guild guild,
+            ReconciliationState state,
+            ReconciliationRun run,
+            Member member,
+            boolean staffMember
+    ) {
+        closeLock.readLock().lock();
+        state.apiCallLock.readLock().lock();
+        try {
+            String guildId = guild.getId();
+            if (closed.get()
+                    || !isCurrent(guildId, state)
+                    || run.abortRequested.get()
+                    || catalogueCache.findReady(guildId).isEmpty()) {
+                return;
+            }
+            UserEnvelope envelope = staffMember
+                    ? botApiService.ensureStaffUser(guildId, member.getId())
+                    : botApiService.ensureUser(guildId, member.getId());
+            addRankRole(guild, member, envelope);
+        } finally {
+            state.apiCallLock.readLock().unlock();
+            closeLock.readLock().unlock();
         }
     }
 
@@ -210,7 +279,7 @@ public class MemberReconciliationService implements AutoCloseable {
         String guildId = guild.getId();
         boolean startTrailingRun = false;
         synchronized (state) {
-            if (!isCurrent(guildId, state) || !state.running) {
+            if (closed.get() || !isCurrent(guildId, state) || !state.running) {
                 return;
             }
             if (state.trailingRequested && catalogueCache.findReady(guildId).isPresent()) {
@@ -236,6 +305,7 @@ public class MemberReconciliationService implements AutoCloseable {
     }
 
     private static final class ReconciliationState {
+        private final ReentrantReadWriteLock apiCallLock = new ReentrantReadWriteLock();
         private boolean running;
         private boolean trailingRequested;
         private volatile boolean cancelled;
