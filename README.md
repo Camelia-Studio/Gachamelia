@@ -20,6 +20,14 @@ Variables requises :
 - `APP_VERSION`
 - `APP_DESCRIPTION`
 
+Variables runtime optionnelles :
+
+- `CATALOGUE_REFRESH_INTERVAL_MINUTES` : fréquence de synchronisation des catalogues, `5` par défaut.
+- `MEMBER_SYNC_CONCURRENCY` : nombre maximal d'appels membres concurrents pour l'ensemble des serveurs, `4` par défaut.
+- `SYNC_BOT_MEMBERS` : inclut les comptes bots dans la réconciliation lorsqu'il vaut `true`, `false` par défaut.
+
+Un serveur dont l'API retourne `validation.ready=false` reste connecté, mais les fonctionnalités membres restent désactivées jusqu'à ce que son catalogue soit prêt.
+
 
 Liens utiles :
 
