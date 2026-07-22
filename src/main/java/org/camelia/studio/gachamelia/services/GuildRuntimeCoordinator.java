@@ -12,15 +12,19 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -35,12 +39,14 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
     private final ExecutorService executor;
     private final ScheduledExecutorService retryScheduler;
     private final LongSupplier nanoTime;
-    // Never acquire a guild lock or invoke callbacks/API calls while holding this lock.
+    // Never wait for an admission, acquire a guild lock or invoke external code while holding this lock.
     private final Object lifecycleLock = new Object();
     private final Map<String, GuildSession> presentGuilds = new HashMap<>();
+    private final Set<GuildSession> liveSessions = new HashSet<>();
     private final Set<String> expectedUnavailableGuildIds = new HashSet<>();
     private final Map<String, Object> guildLocks = new HashMap<>();
     private final Map<String, Deactivation> deactivations = new HashMap<>();
+    private final CountDownLatch closeCompleted = new CountDownLatch(1);
     private boolean closed;
     private long nextEpoch;
     private volatile Consumer<Guild> readyHandler = ignored -> { };
@@ -132,27 +138,37 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
     }
 
     public void leaveGuild(String guildId) {
+        GuildSession session;
         Deactivation deactivation;
         synchronized (lifecycleLock) {
             if (closed) {
                 return;
             }
-            presentGuilds.remove(guildId);
+            session = presentGuilds.get(guildId);
+            if (session != null) {
+                session.assertCanStop("leaveGuild");
+                presentGuilds.remove(guildId);
+                session.stopAccepting();
+            }
             expectedUnavailableGuildIds.remove(guildId);
-            catalogueCache.remove(guildId);
             deactivation = new Deactivation(guildId, nanoTime.getAsLong(), guildLockLocked(guildId));
             deactivations.put(guildId, deactivation);
         }
 
+        catalogueCache.remove(guildId);
         reconciliationCanceller.accept(guildId);
+        awaitAndRetire(session);
+        if (!isCurrent(deactivation)) {
+            return;
+        }
+        // An already admitted refresh may have completed after the immediate removal.
+        catalogueCache.remove(guildId);
         submitDeactivation(deactivation, 0);
     }
 
     public Optional<CatalogueEnvelope> findReadyCatalogue(String guildId) {
-        synchronized (lifecycleLock) {
-            if (closed) {
-                return Optional.empty();
-            }
+        if (currentSession(guildId) == null) {
+            return Optional.empty();
         }
         return catalogueCache.findReady(guildId);
     }
@@ -161,24 +177,16 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         String guildId = guild.getId();
         GuildSession session = requireCurrentSession(guildId);
         catalogueCache.requireReady(guildId);
-        requireCurrent(session);
         try {
-            return operation.get();
+            return executeAdmitted(session, operation);
         } catch (ApiException exception) {
             if (!isRecoverable(exception)) {
                 throw exception;
             }
         }
 
-        synchronized (session.guildLock()) {
-            requireCurrent(session);
-            botApiService.upsertGuild(guild);
-            CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(guildId));
-            replaceCatalogue(session, next);
-            catalogueCache.requireReady(guildId);
-        }
-        requireCurrent(session);
-        return operation.get();
+        recoverSynchronously(guild, session);
+        return executeAdmitted(session, operation);
     }
 
     public void refreshGuildEmojis(Guild guild) {
@@ -191,32 +199,68 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
 
     @Override
     public void close() {
+        List<GuildSession> sessions;
+        Set<String> guildIds;
+        boolean closeOwner;
         synchronized (lifecycleLock) {
             if (closed) {
-                return;
+                closeOwner = false;
+                sessions = List.copyOf(liveSessions);
+                sessions.forEach(session -> session.assertCanStop("close"));
+                guildIds = Set.of();
+            } else {
+                liveSessions.forEach(session -> session.assertCanStop("close"));
+                closed = true;
+                sessions = List.copyOf(liveSessions);
+                guildIds = new HashSet<>();
+                sessions.forEach(session -> guildIds.add(session.guildId()));
+                sessions.forEach(GuildSession::stopAccepting);
+                presentGuilds.clear();
+                expectedUnavailableGuildIds.clear();
+                deactivations.clear();
+                closeOwner = true;
             }
-            closed = true;
-            presentGuilds.clear();
-            expectedUnavailableGuildIds.clear();
-            deactivations.clear();
-            guildLocks.clear();
         }
-        executor.shutdownNow();
-        retryScheduler.shutdownNow();
+        if (!closeOwner) {
+            await(closeCompleted);
+            return;
+        }
+
+        try {
+            sessions.forEach(GuildSession::awaitDrained);
+            guildIds.forEach(catalogueCache::remove);
+            executor.shutdownNow();
+            retryScheduler.shutdownNow();
+            synchronized (lifecycleLock) {
+                liveSessions.clear();
+                guildLocks.clear();
+            }
+        } finally {
+            closeCompleted.countDown();
+        }
     }
 
     private GuildSession admitGuild(Guild guild) {
         String guildId = guild.getId();
+        GuildSession previous;
+        GuildSession session;
         synchronized (lifecycleLock) {
             if (closed) {
                 return null;
             }
-            GuildSession session = new GuildSession(guildId, ++nextEpoch, guildLockLocked(guildId));
+            previous = presentGuilds.get(guildId);
+            if (previous != null) {
+                previous.assertCanStop("startGuild");
+                previous.stopAccepting();
+            }
+            session = new GuildSession(guildId, ++nextEpoch, guildLockLocked(guildId));
             presentGuilds.put(guildId, session);
+            liveSessions.add(session);
             expectedUnavailableGuildIds.remove(guildId);
             deactivations.remove(guildId);
-            return session;
         }
+        awaitAndRetire(previous);
+        return session;
     }
 
     private void synchronizeGuild(
@@ -226,30 +270,17 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
             boolean forceReadySignal
     ) {
         boolean signalReady;
-        synchronized (session.guildLock()) {
-            if (!isCurrent(session)) {
-                return;
-            }
-            botApiService.upsertGuild(guild);
-            if (!isCurrent(session)) {
-                return;
-            }
-            if (refreshEmojis) {
-                botApiService.refreshGuildEmojis(guild);
-                if (!isCurrent(session)) {
-                    return;
+        try (Admission ignored = session.admit()) {
+            synchronized (session.guildLock()) {
+                botApiService.upsertGuild(guild);
+                if (refreshEmojis) {
+                    botApiService.refreshGuildEmojis(guild);
                 }
+                CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(session.guildId()));
+                CatalogueEnvelope previous = catalogueCache.put(session.guildId(), next);
+                logValidationChange(session.guildId(), previous, next);
+                signalReady = isReady(next) && (forceReadySignal || !isReady(previous));
             }
-            CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(session.guildId()));
-            CatalogueEnvelope previous;
-            synchronized (lifecycleLock) {
-                if (!isCurrentLocked(session)) {
-                    return;
-                }
-                previous = catalogueCache.put(session.guildId(), next);
-            }
-            logValidationChange(session.guildId(), previous, next);
-            signalReady = isReady(next) && (forceReadySignal || !isReady(previous));
         }
         if (signalReady) {
             submitReadySignal(guild, session);
@@ -258,15 +289,10 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
 
     private void submitReadySignal(Guild guild, GuildSession session) {
         submit("signalement du catalogue prêt", session.guildId(), () -> {
-            Consumer<Guild> handler;
-            synchronized (lifecycleLock) {
-                if (!isCurrentLocked(session)) {
-                    return;
-                }
-                handler = readyHandler;
-            }
-            try {
-                handler.accept(guild);
+            try (Admission ignored = session.admit()) {
+                readyHandler.accept(guild);
+            } catch (GuildNotReadyException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 logger.warn("Impossible de traiter le catalogue prêt de la guilde {}", session.guildId(), exception);
             }
@@ -274,26 +300,23 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
     }
 
     private void refreshGuildEmojisLocked(Guild guild, GuildSession session) {
-        synchronized (session.guildLock()) {
-            if (!isCurrent(session)) {
-                return;
-            }
-            try {
-                botApiService.refreshGuildEmojis(guild);
-                return;
-            } catch (ApiException exception) {
-                if (!isRecoverable(exception)) {
-                    throw exception;
+        try (Admission ignored = session.admit()) {
+            synchronized (session.guildLock()) {
+                try {
+                    botApiService.refreshGuildEmojis(guild);
+                    return;
+                } catch (ApiException exception) {
+                    if (!isRecoverable(exception)) {
+                        throw exception;
+                    }
                 }
-            }
 
-            requireCurrent(session);
-            botApiService.upsertGuild(guild);
-            CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(session.guildId()));
-            CatalogueEnvelope previous = replaceCatalogue(session, next);
-            logValidationChange(session.guildId(), previous, next);
-            requireCurrent(session);
-            botApiService.refreshGuildEmojis(guild);
+                botApiService.upsertGuild(guild);
+                CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(session.guildId()));
+                CatalogueEnvelope previous = catalogueCache.put(session.guildId(), next);
+                logValidationChange(session.guildId(), previous, next);
+                botApiService.refreshGuildEmojis(guild);
+            }
         }
     }
 
@@ -389,30 +412,46 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         return session;
     }
 
-    private void requireCurrent(GuildSession session) {
-        if (!isCurrent(session)) {
-            throw new GuildNotReadyException(session.guildId());
-        }
-    }
-
-    private CatalogueEnvelope replaceCatalogue(GuildSession session, CatalogueEnvelope next) {
-        synchronized (lifecycleLock) {
-            if (!isCurrentLocked(session)) {
-                throw new GuildNotReadyException(session.guildId());
+    private void recoverSynchronously(Guild guild, GuildSession session) {
+        try (Admission ignored = session.admit()) {
+            synchronized (session.guildLock()) {
+                botApiService.upsertGuild(guild);
+                CatalogueEnvelope next = requireValidCatalogue(botApiService.loadCatalogue(session.guildId()));
+                catalogueCache.put(session.guildId(), next);
+                catalogueCache.requireReady(session.guildId());
             }
-            return catalogueCache.put(session.guildId(), next);
         }
     }
 
-    private boolean isCurrent(GuildSession session) {
+    private <T> T executeAdmitted(GuildSession session, Supplier<T> operation) {
+        try (Admission ignored = session.admit()) {
+            return operation.get();
+        }
+    }
+
+    private void awaitAndRetire(GuildSession session) {
+        if (session == null) {
+            return;
+        }
+        session.awaitDrained();
         synchronized (lifecycleLock) {
-            return isCurrentLocked(session);
+            liveSessions.remove(session);
         }
     }
 
-    private boolean isCurrentLocked(GuildSession session) {
-        GuildSession current = presentGuilds.get(session.guildId());
-        return !closed && current != null && current.epoch() == session.epoch();
+    private void await(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                latch.await();
+                break;
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private boolean isCurrent(Deactivation deactivation) {
@@ -474,7 +513,76 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
                 guildId, nextValidation.ready(), nextValidation.errors(), nextValidation.warnings());
     }
 
-    private record GuildSession(String guildId, long epoch, Object guildLock) {
+    private static final class GuildSession {
+        private final String guildId;
+        private final long epoch;
+        private final Object guildLock;
+        private final ReentrantReadWriteLock admissionGate = new ReentrantReadWriteLock(true);
+        private volatile boolean accepting = true;
+
+        private GuildSession(String guildId, long epoch, Object guildLock) {
+            this.guildId = guildId;
+            this.epoch = epoch;
+            this.guildLock = guildLock;
+        }
+
+        private String guildId() {
+            return guildId;
+        }
+
+        @SuppressWarnings("unused")
+        private long epoch() {
+            return epoch;
+        }
+
+        private Object guildLock() {
+            return guildLock;
+        }
+
+        private Admission admit() {
+            Lock readLock = admissionGate.readLock();
+            readLock.lock();
+            if (!accepting) {
+                readLock.unlock();
+                throw new GuildNotReadyException(guildId);
+            }
+            return new Admission(readLock);
+        }
+
+        private void stopAccepting() {
+            accepting = false;
+        }
+
+        private void awaitDrained() {
+            assertCanStop("attente de fin");
+            Lock writeLock = admissionGate.writeLock();
+            writeLock.lock();
+            writeLock.unlock();
+        }
+
+        private void assertCanStop(String action) {
+            if (admissionGate.getReadHoldCount() > 0) {
+                throw new IllegalStateException(action
+                        + " ne peut pas être appelé depuis une action admise de la guilde " + guildId);
+            }
+        }
+    }
+
+    private static final class Admission implements AutoCloseable {
+        private final Lock lock;
+        private boolean closed;
+
+        private Admission(Lock lock) {
+            this.lock = lock;
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                lock.unlock();
+            }
+        }
     }
 
     private record Deactivation(String guildId, long departureNanos, Object guildLock) {
