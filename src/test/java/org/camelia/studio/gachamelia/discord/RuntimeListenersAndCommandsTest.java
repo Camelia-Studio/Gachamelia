@@ -902,7 +902,7 @@ class RuntimeListenersAndCommandsTest {
         private final List<String> guildIds = new ArrayList<>();
 
         private RecordingGuildEmojiRefreshDebouncer() {
-            super(null, null, Duration.ZERO);
+            super(ignored -> { }, Duration.ZERO);
         }
 
         @Override

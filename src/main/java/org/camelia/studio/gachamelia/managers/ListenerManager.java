@@ -12,6 +12,7 @@ import org.camelia.studio.gachamelia.listeners.SlashCommandListener;
 import org.camelia.studio.gachamelia.services.CatalogueMessageService;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
 import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
+import org.camelia.studio.gachamelia.utils.RuntimeConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,16 +29,31 @@ public class ListenerManager {
             BotApiService botApiService,
             CatalogueMessageService messageService,
             GuildEmojiRefreshDebouncer emojiRefreshDebouncer,
-            GuildRuntimeCoordinator coordinator
+            GuildRuntimeCoordinator coordinator,
+            RuntimeConfiguration runtimeConfiguration
     ) {
         this.commandManager = commandManager;
         listener = new ArrayList<>();
 
         addListener(new SlashCommandListener(commandManager));
         addListener(new GuildLifecycleListener(coordinator));
-        addListener(new GuildMemberJoinListener(botApiService, coordinator, messageService));
-        addListener(new GuildMemberLeaveListener(botApiService, coordinator, messageService));
-        addListener(new GuildMemberRoleChangeListener(botApiService, coordinator));
+        addListener(new GuildMemberJoinListener(
+                botApiService,
+                coordinator,
+                messageService,
+                runtimeConfiguration.syncBotMembers()
+        ));
+        addListener(new GuildMemberLeaveListener(
+                botApiService,
+                coordinator,
+                messageService,
+                runtimeConfiguration.syncBotMembers()
+        ));
+        addListener(new GuildMemberRoleChangeListener(
+                botApiService,
+                coordinator,
+                runtimeConfiguration.syncBotMembers()
+        ));
         addListener(new GuildEmojiListener(emojiRefreshDebouncer));
     }
 

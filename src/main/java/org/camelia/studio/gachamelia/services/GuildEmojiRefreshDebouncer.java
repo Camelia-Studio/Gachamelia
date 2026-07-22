@@ -1,35 +1,43 @@
 package org.camelia.studio.gachamelia.services;
 
 import net.dv8tion.jda.api.entities.Guild;
-import org.camelia.studio.gachamelia.api.GachameliaApiClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 public class GuildEmojiRefreshDebouncer implements AutoCloseable {
     private static final Logger logger = LoggerFactory.getLogger(GuildEmojiRefreshDebouncer.class);
 
-    private final GachameliaApiClient apiClient;
-    private final EmojiSnapshotService snapshotService;
+    private final Consumer<Guild> refreshAction;
     private final Duration delay;
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, GuildRefreshState> states = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean();
 
-    public GuildEmojiRefreshDebouncer(GachameliaApiClient apiClient, EmojiSnapshotService snapshotService, Duration delay) {
-        this.apiClient = apiClient;
-        this.snapshotService = snapshotService;
-        this.delay = delay;
+    public GuildEmojiRefreshDebouncer(Consumer<Guild> refreshAction, Duration delay) {
+        this.refreshAction = Objects.requireNonNull(refreshAction);
+        this.delay = Objects.requireNonNull(delay);
     }
 
     public void requestRefresh(Guild guild) {
+        if (closed.get()) {
+            return;
+        }
         states.compute(guild.getId(), (guildId, existingState) -> {
+            if (closed.get()) {
+                return null;
+            }
             GuildRefreshState state = existingState == null ? new GuildRefreshState() : existingState;
             synchronized (state) {
                 state.latestGuild = guild;
@@ -45,11 +53,19 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
     }
 
     private void scheduleLocked(String guildId, GuildRefreshState state) {
+        if (closed.get()) {
+            state.trailingRequested = false;
+            return;
+        }
         if (state.pendingFuture != null) {
             state.pendingFuture.cancel(false);
         }
 
-        state.pendingFuture = executor.schedule(() -> runRefresh(guildId, state), delay.toMillis(), TimeUnit.MILLISECONDS);
+        try {
+            state.pendingFuture = executor.schedule(() -> runRefresh(guildId, state), delay.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException exception) {
+            state.trailingRequested = false;
+        }
     }
 
     private void runRefresh(String guildId, GuildRefreshState state) {
@@ -57,7 +73,8 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
         synchronized (state) {
             state.pendingFuture = null;
             guild = state.latestGuild;
-            if (guild == null) {
+            if (guild == null || closed.get()) {
+                state.trailingRequested = false;
                 cleanupState(guildId, state);
                 return;
             }
@@ -65,16 +82,17 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
         }
 
         try {
-            apiClient.refreshEmojis(snapshotService.serverSnapshot(guild.getId(), guild.getEmojis()));
+            refreshAction.accept(guild);
         } catch (Exception exception) {
             logger.warn("Impossible de rafraîchir les emojis du serveur {}", guild.getId(), exception);
         } finally {
             synchronized (state) {
                 state.inFlight = false;
-                if (state.trailingRequested) {
+                if (!closed.get() && state.trailingRequested) {
                     state.trailingRequested = false;
                     scheduleLocked(guildId, state);
                 } else {
+                    state.trailingRequested = false;
                     cleanupState(guildId, state);
                 }
             }
@@ -89,7 +107,10 @@ public class GuildEmojiRefreshDebouncer implements AutoCloseable {
 
     @Override
     public void close() {
-        executor.shutdownNow();
+        if (closed.compareAndSet(false, true)) {
+            executor.shutdownNow();
+            states.clear();
+        }
     }
 
     private static final class GuildRefreshState {

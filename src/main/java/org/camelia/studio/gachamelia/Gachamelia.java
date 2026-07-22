@@ -20,6 +20,7 @@ import org.camelia.studio.gachamelia.services.EmojiSnapshotService;
 import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
 import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
+import org.camelia.studio.gachamelia.services.MemberReconciliationService;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.camelia.studio.gachamelia.utils.RuntimeConfiguration;
 import org.slf4j.Logger;
@@ -28,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.random.RandomGenerator;
 
 public class Gachamelia {
@@ -41,10 +43,12 @@ public class Gachamelia {
         GuildEmojiRefreshDebouncer emojiRefreshDebouncer = null;
         CatalogueRefreshScheduler catalogueRefreshScheduler = null;
         GuildRuntimeCoordinator coordinator = null;
+        MemberReconciliationService reconciliationService = null;
 
         try {
-            Configuration.getInstance();
-            ApiConfiguration apiConfiguration = ApiConfiguration.from(Configuration.getInstance());
+            Configuration configuration = Configuration.getInstance();
+            RuntimeConfiguration runtimeConfiguration = RuntimeConfiguration.from(configuration);
+            ApiConfiguration apiConfiguration = ApiConfiguration.from(configuration);
             HttpClient httpClient = HttpClient.newBuilder()
                     .connectTimeout(API_CONNECT_TIMEOUT)
                     .build();
@@ -53,17 +57,35 @@ public class Gachamelia {
             GachameliaApiClient apiClient = new GachameliaApiClient(apiConfiguration, tokenProvider, apiTransport);
             GuildCatalogueCache catalogueCache = new GuildCatalogueCache();
             EmojiSnapshotService emojiSnapshotService = new EmojiSnapshotService();
-            RuntimeConfiguration runtimeConfiguration = RuntimeConfiguration.from(Configuration.getInstance());
             BotApiService botApiService = new BotApiService(apiClient, emojiSnapshotService);
             botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
-            emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
             CatalogueMessageService catalogueMessageService = new CatalogueMessageService(RandomGenerator.getDefault());
-            coordinator = new GuildRuntimeCoordinator(botApiService, catalogueCache, runtimeConfiguration, ignored -> { });
+            AtomicReference<MemberReconciliationService> reconciliationRef = new AtomicReference<>();
+            coordinator = new GuildRuntimeCoordinator(
+                    botApiService,
+                    catalogueCache,
+                    runtimeConfiguration,
+                    guildId -> {
+                        MemberReconciliationService service = reconciliationRef.get();
+                        if (service != null) {
+                            service.cancel(guildId);
+                        }
+                    }
+            );
+            reconciliationService = new MemberReconciliationService(
+                    botApiService,
+                    catalogueCache,
+                    runtimeConfiguration,
+                    coordinator::recoverGuild
+            );
+            reconciliationRef.set(reconciliationService);
+            coordinator.setReadyHandler(reconciliationService::request);
+            emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(coordinator::refreshGuildEmojis, Duration.ofSeconds(3));
             CommandManager commandManager = new CommandManager(botApiService, coordinator);
             catalogueRefreshScheduler = new CatalogueRefreshScheduler(coordinator, runtimeConfiguration);
             ReadyListener readyListener = new ReadyListener(coordinator, botEmojiScheduler, catalogueRefreshScheduler);
 
-            jda = JDABuilder.createDefault(Configuration.getInstance().getDotenv().get("BOT_TOKEN"))
+            jda = JDABuilder.createDefault(configuration.getDotenv().get("BOT_TOKEN"))
                     .enableIntents(GatewayIntent.getIntents(GatewayIntent.ALL_INTENTS))
                     .build()
                     .awaitReady();
@@ -73,7 +95,8 @@ public class Gachamelia {
                     botApiService,
                     catalogueMessageService,
                     emojiRefreshDebouncer,
-                    coordinator
+                    coordinator,
+                    runtimeConfiguration
             ).registerListeners(jda);
 
             readyListener.initialize(jda);
@@ -83,66 +106,59 @@ public class Gachamelia {
             GuildEmojiRefreshDebouncer readyEmojiRefreshDebouncer = emojiRefreshDebouncer;
             CatalogueRefreshScheduler readyCatalogueRefreshScheduler = catalogueRefreshScheduler;
             GuildRuntimeCoordinator readyCoordinator = coordinator;
+            MemberReconciliationService readyReconciliationService = reconciliationService;
             Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(
                     readyCatalogueRefreshScheduler,
-                    readyBotEmojiScheduler,
                     readyEmojiRefreshDebouncer,
                     readyCoordinator,
+                    readyReconciliationService,
+                    readyBotEmojiScheduler,
                     readyJda
             )));
         } catch (InterruptedException e) {
-            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
+            shutdown(catalogueRefreshScheduler, emojiRefreshDebouncer, coordinator, reconciliationService, botEmojiScheduler, jda);
             Thread.currentThread().interrupt();
             logger.error("Le thread a été interrompu : {}", e.getMessage());
             System.exit(1);
         } catch (IllegalArgumentException exception) {
-            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
+            shutdown(catalogueRefreshScheduler, emojiRefreshDebouncer, coordinator, reconciliationService, botEmojiScheduler, jda);
             logger.error("Configuration invalide : {}", exception.getMessage());
             System.exit(1);
         } catch (ApiException exception) {
-            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
+            shutdown(catalogueRefreshScheduler, emojiRefreshDebouncer, coordinator, reconciliationService, botEmojiScheduler, jda);
             logger.error("Erreur API au démarrage : {} ({})", exception.errorCode(), exception.statusCode());
             System.exit(1);
         } catch (Exception e) {
-            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
+            shutdown(catalogueRefreshScheduler, emojiRefreshDebouncer, coordinator, reconciliationService, botEmojiScheduler, jda);
             logger.error("Une erreur est survenue lors de l'exécution du bot : {}", e.getMessage());
             System.exit(1);
         }
     }
 
-    static void shutdown(BotEmojiScheduler botEmojiScheduler, GuildEmojiRefreshDebouncer emojiRefreshDebouncer, JDA jda) {
-        if (botEmojiScheduler != null) {
-            botEmojiScheduler.close();
-        }
-        if (emojiRefreshDebouncer != null) {
-            emojiRefreshDebouncer.close();
-        }
-        if (jda != null) {
-            jda.shutdown();
-        }
-    }
-
     static void shutdown(
             CatalogueRefreshScheduler catalogueRefreshScheduler,
-            BotEmojiScheduler botEmojiScheduler,
             GuildEmojiRefreshDebouncer emojiRefreshDebouncer,
             GuildRuntimeCoordinator coordinator,
+            MemberReconciliationService reconciliationService,
+            BotEmojiScheduler botEmojiScheduler,
             JDA jda
     ) {
-        if (catalogueRefreshScheduler != null) {
-            catalogueRefreshScheduler.close();
+        closeQuietly("catalogue refresh scheduler", catalogueRefreshScheduler == null ? null : catalogueRefreshScheduler::close);
+        closeQuietly("guild emoji refresh debouncer", emojiRefreshDebouncer == null ? null : emojiRefreshDebouncer::close);
+        closeQuietly("guild runtime coordinator", coordinator == null ? null : coordinator::close);
+        closeQuietly("member reconciliation service", reconciliationService == null ? null : reconciliationService::close);
+        closeQuietly("bot emoji scheduler", botEmojiScheduler == null ? null : botEmojiScheduler::close);
+        closeQuietly("JDA", jda == null ? null : jda::shutdown);
+    }
+
+    private static void closeQuietly(String component, Runnable closeAction) {
+        if (closeAction == null) {
+            return;
         }
-        if (emojiRefreshDebouncer != null) {
-            emojiRefreshDebouncer.close();
-        }
-        if (coordinator != null) {
-            coordinator.close();
-        }
-        if (botEmojiScheduler != null) {
-            botEmojiScheduler.close();
-        }
-        if (jda != null) {
-            jda.shutdown();
+        try {
+            closeAction.run();
+        } catch (Throwable exception) {
+            logger.warn("Impossible d'arrêter {}", component, exception);
         }
     }
 }
