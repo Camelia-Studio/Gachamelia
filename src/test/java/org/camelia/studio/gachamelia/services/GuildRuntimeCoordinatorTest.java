@@ -893,7 +893,7 @@ class GuildRuntimeCoordinatorTest {
         private final AtomicInteger deleteCalls = new AtomicInteger();
 
         private RecordingBotApiService(CatalogueEnvelope catalogue) {
-            super(null, null, null);
+            super(null, null);
             currentCatalogue = catalogue;
         }
 

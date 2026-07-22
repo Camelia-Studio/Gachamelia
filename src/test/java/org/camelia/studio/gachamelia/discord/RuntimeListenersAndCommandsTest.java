@@ -658,7 +658,7 @@ class RuntimeListenersAndCommandsTest {
         private RuntimeException ensureStaffUserFailure;
 
         private RecordingBotApiService(UserEnvelope envelope) {
-            super(null, null, null);
+            super(null, null);
             this.envelope = envelope;
         }
 

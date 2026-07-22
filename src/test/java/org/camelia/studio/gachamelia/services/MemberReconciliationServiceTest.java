@@ -630,7 +630,7 @@ class MemberReconciliationServiceTest {
         private volatile RuntimeException firstFailure;
 
         private RecordingBotApiService() {
-            super(null, null, null);
+            super(null, null);
         }
 
         private void blockCalls(int expectedBlockedCalls, int expectedCompletedCalls) {

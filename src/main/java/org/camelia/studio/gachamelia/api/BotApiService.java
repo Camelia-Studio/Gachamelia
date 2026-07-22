@@ -7,25 +7,14 @@ import org.camelia.studio.gachamelia.api.dto.DiscordServerUpsertRequest;
 import org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse;
 import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.services.EmojiSnapshotService;
-import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 
 public class BotApiService {
     private final GachameliaApiClient apiClient;
-    private final GuildCatalogueCache catalogueCache;
     private final EmojiSnapshotService emojiSnapshotService;
 
-    public BotApiService(GachameliaApiClient apiClient, GuildCatalogueCache catalogueCache, EmojiSnapshotService emojiSnapshotService) {
+    public BotApiService(GachameliaApiClient apiClient, EmojiSnapshotService emojiSnapshotService) {
         this.apiClient = apiClient;
-        this.catalogueCache = catalogueCache;
         this.emojiSnapshotService = emojiSnapshotService;
-    }
-
-    public CatalogueEnvelope initializeGuild(Guild guild) {
-        upsertGuild(guild);
-        refreshGuildEmojis(guild);
-        CatalogueEnvelope envelope = loadCatalogue(guild.getId());
-        catalogueCache.put(guild.getId(), envelope);
-        return envelope;
     }
 
     public DiscordServerEnvelope upsertGuild(Guild guild) {

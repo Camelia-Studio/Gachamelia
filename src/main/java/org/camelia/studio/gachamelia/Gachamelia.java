@@ -15,10 +15,13 @@ import org.camelia.studio.gachamelia.managers.CommandManager;
 import org.camelia.studio.gachamelia.managers.ListenerManager;
 import org.camelia.studio.gachamelia.services.BotEmojiScheduler;
 import org.camelia.studio.gachamelia.services.CatalogueMessageService;
+import org.camelia.studio.gachamelia.services.CatalogueRefreshScheduler;
 import org.camelia.studio.gachamelia.services.EmojiSnapshotService;
 import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
+import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
 import org.camelia.studio.gachamelia.utils.Configuration;
+import org.camelia.studio.gachamelia.utils.RuntimeConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +39,8 @@ public class Gachamelia {
         JDA jda = null;
         BotEmojiScheduler botEmojiScheduler = null;
         GuildEmojiRefreshDebouncer emojiRefreshDebouncer = null;
+        CatalogueRefreshScheduler catalogueRefreshScheduler = null;
+        GuildRuntimeCoordinator coordinator = null;
 
         try {
             Configuration.getInstance();
@@ -48,19 +53,20 @@ public class Gachamelia {
             GachameliaApiClient apiClient = new GachameliaApiClient(apiConfiguration, tokenProvider, apiTransport);
             GuildCatalogueCache catalogueCache = new GuildCatalogueCache();
             EmojiSnapshotService emojiSnapshotService = new EmojiSnapshotService();
-            BotApiService botApiService = new BotApiService(apiClient, catalogueCache, emojiSnapshotService);
+            RuntimeConfiguration runtimeConfiguration = RuntimeConfiguration.from(Configuration.getInstance());
+            BotApiService botApiService = new BotApiService(apiClient, emojiSnapshotService);
             botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
             emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
             CatalogueMessageService catalogueMessageService = new CatalogueMessageService(RandomGenerator.getDefault());
             CommandManager commandManager = new CommandManager(botApiService, catalogueCache);
-            ReadyListener readyListener = new ReadyListener(botApiService, botEmojiScheduler);
+            coordinator = new GuildRuntimeCoordinator(botApiService, catalogueCache, runtimeConfiguration, ignored -> { });
+            catalogueRefreshScheduler = new CatalogueRefreshScheduler(coordinator, runtimeConfiguration);
+            ReadyListener readyListener = new ReadyListener(coordinator, botEmojiScheduler, catalogueRefreshScheduler);
 
             jda = JDABuilder.createDefault(Configuration.getInstance().getDotenv().get("BOT_TOKEN"))
                     .enableIntents(GatewayIntent.getIntents(GatewayIntent.ALL_INTENTS))
                     .build()
                     .awaitReady();
-
-            readyListener.initialize(jda);
 
             new ListenerManager(
                     commandManager,
@@ -68,28 +74,38 @@ public class Gachamelia {
                     catalogueCache,
                     catalogueMessageService,
                     emojiRefreshDebouncer,
-                    readyListener
+                    coordinator
             ).registerListeners(jda);
+
+            readyListener.initialize(jda);
 
             JDA readyJda = jda;
             BotEmojiScheduler readyBotEmojiScheduler = botEmojiScheduler;
             GuildEmojiRefreshDebouncer readyEmojiRefreshDebouncer = emojiRefreshDebouncer;
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(readyBotEmojiScheduler, readyEmojiRefreshDebouncer, readyJda)));
+            CatalogueRefreshScheduler readyCatalogueRefreshScheduler = catalogueRefreshScheduler;
+            GuildRuntimeCoordinator readyCoordinator = coordinator;
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(
+                    readyCatalogueRefreshScheduler,
+                    readyBotEmojiScheduler,
+                    readyEmojiRefreshDebouncer,
+                    readyCoordinator,
+                    readyJda
+            )));
         } catch (InterruptedException e) {
-            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
+            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
             Thread.currentThread().interrupt();
             logger.error("Le thread a été interrompu : {}", e.getMessage());
             System.exit(1);
         } catch (IllegalArgumentException exception) {
-            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
+            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
             logger.error("Configuration invalide : {}", exception.getMessage());
             System.exit(1);
         } catch (ApiException exception) {
-            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
+            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
             logger.error("Erreur API au démarrage : {} ({})", exception.errorCode(), exception.statusCode());
             System.exit(1);
         } catch (Exception e) {
-            shutdown(botEmojiScheduler, emojiRefreshDebouncer, jda);
+            shutdown(catalogueRefreshScheduler, botEmojiScheduler, emojiRefreshDebouncer, coordinator, jda);
             logger.error("Une erreur est survenue lors de l'exécution du bot : {}", e.getMessage());
             System.exit(1);
         }
@@ -101,6 +117,30 @@ public class Gachamelia {
         }
         if (emojiRefreshDebouncer != null) {
             emojiRefreshDebouncer.close();
+        }
+        if (jda != null) {
+            jda.shutdown();
+        }
+    }
+
+    static void shutdown(
+            CatalogueRefreshScheduler catalogueRefreshScheduler,
+            BotEmojiScheduler botEmojiScheduler,
+            GuildEmojiRefreshDebouncer emojiRefreshDebouncer,
+            GuildRuntimeCoordinator coordinator,
+            JDA jda
+    ) {
+        if (catalogueRefreshScheduler != null) {
+            catalogueRefreshScheduler.close();
+        }
+        if (emojiRefreshDebouncer != null) {
+            emojiRefreshDebouncer.close();
+        }
+        if (coordinator != null) {
+            coordinator.close();
+        }
+        if (botEmojiScheduler != null) {
+            botEmojiScheduler.close();
         }
         if (jda != null) {
             jda.shutdown();
