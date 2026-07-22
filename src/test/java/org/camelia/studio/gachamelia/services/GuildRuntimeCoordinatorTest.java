@@ -288,6 +288,49 @@ class GuildRuntimeCoordinatorTest {
     }
 
     @Test
+    void rejoinSchedulesOldCleanupBeforeNewSyncOnSingleThreadExecutor() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        BlockingRemoveCatalogueCache cache = new BlockingRemoveCatalogueCache();
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1,
+                1,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(),
+                runnable -> Thread.ofPlatform().daemon(true).unstarted(runnable)
+        );
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+        boolean rejoinCompleted = false;
+
+        try {
+            coordinator.startGuild(guild);
+            assertThat(waitUntil(() -> cache.findReady(guild.getId()).isPresent())).isTrue();
+            assertThat(waitUntil(() -> executor.getActiveCount() == 0 && executor.getQueue().isEmpty())).isTrue();
+            cache.blockNextRemove();
+
+            Thread leaveThread = Thread.ofPlatform().daemon(true).name("guild-leave").start(
+                    () -> coordinator.leaveGuild(guild.getId())
+            );
+            assertThat(cache.awaitBlockedRemove()).isTrue();
+            coordinator.startGuild(guild);
+            cache.releaseRemove();
+            leaveThread.join(2_000);
+
+            rejoinCompleted = waitUntil(() -> cache.findReady(guild.getId()).isPresent());
+            assertThat(rejoinCompleted).isTrue();
+            assertThat(leaveThread.isAlive()).isFalse();
+        } finally {
+            cache.releaseRemove();
+            if (rejoinCompleted) {
+                coordinator.close();
+            } else {
+                executor.shutdownNow();
+            }
+        }
+    }
+
+    @Test
     void leaveReturnsImmediatelyWhileAnAdmittedRefreshIsBlocked() throws Exception {
         RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
         GuildCatalogueCache cache = new GuildCatalogueCache();
@@ -355,6 +398,23 @@ class GuildRuntimeCoordinatorTest {
             api.releaseCatalogueLoad();
             coordinator.close();
         }
+    }
+
+    @Test
+    void staleRefreshOwnerCannotAbortANewerRun() {
+        GuildRuntimeCoordinator.RefreshState state = new GuildRuntimeCoordinator.RefreshState();
+        long firstOwner = state.request(true);
+
+        assertThat(firstOwner).isPositive();
+        assertThat(state.complete(firstOwner, true)).isFalse();
+
+        long secondOwner = state.request(true);
+        assertThat(secondOwner).isPositive();
+        state.abort(firstOwner);
+
+        assertThat(state.request(true)).isZero();
+        assertThat(state.complete(secondOwner, true)).isTrue();
+        assertThat(state.complete(secondOwner, true)).isFalse();
     }
 
     @Test
@@ -1180,6 +1240,40 @@ class GuildRuntimeCoordinatorTest {
 
         private boolean awaitWorkerWaiting() throws InterruptedException {
             return waitUntil(() -> workerThread != null && isWaiting(workerThread));
+        }
+    }
+
+    private static final class BlockingRemoveCatalogueCache extends GuildCatalogueCache {
+        private final AtomicReference<CountDownLatch> removeEntered = new AtomicReference<>();
+        private final AtomicReference<Semaphore> removeRelease = new AtomicReference<>();
+
+        private void blockNextRemove() {
+            removeEntered.set(new CountDownLatch(1));
+            removeRelease.set(new Semaphore(0));
+        }
+
+        private boolean awaitBlockedRemove() throws InterruptedException {
+            CountDownLatch latch = removeEntered.get();
+            return latch != null && latch.await(2, TimeUnit.SECONDS);
+        }
+
+        private void releaseRemove() {
+            Semaphore semaphore = removeRelease.get();
+            if (semaphore != null) {
+                semaphore.release();
+            }
+        }
+
+        @Override
+        public void remove(String guildId) {
+            CountDownLatch latch = removeEntered.getAndSet(null);
+            Semaphore semaphore = removeRelease.get();
+            if (latch != null && semaphore != null) {
+                latch.countDown();
+                semaphore.acquireUninterruptibly();
+                removeRelease.compareAndSet(semaphore, null);
+            }
+            super.remove(guildId);
         }
     }
 

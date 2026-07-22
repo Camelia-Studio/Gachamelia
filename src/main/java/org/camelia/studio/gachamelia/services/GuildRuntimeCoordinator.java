@@ -109,8 +109,11 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
 
     public void refreshGuild(Guild guild) {
         GuildSession session = currentSession(guild.getId());
-        if (session != null && session.requestRefresh()) {
-            submitRefresh(guild, session);
+        if (session != null) {
+            long refreshOwner = session.requestRefresh();
+            if (refreshOwner != 0L) {
+                submitRefresh(guild, session, refreshOwner);
+            }
         }
     }
 
@@ -257,7 +260,6 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         String guildId = guild.getId();
         GuildSession previous;
         GuildSession session;
-        Transition transitionToSchedule = null;
         Transition predecessor = null;
         synchronized (lifecycleLock) {
             if (closed) {
@@ -267,9 +269,8 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
             if (previous != null) {
                 previous.assertCanStop("startGuild");
                 previous.stopAccepting();
-                transitionToSchedule = new Transition(guildId, previous);
-                liveTransitions.add(transitionToSchedule);
-                predecessor = transitionToSchedule;
+                predecessor = new Transition(guildId, previous);
+                liveTransitions.add(predecessor);
             } else {
                 Deactivation deactivation = deactivations.remove(guildId);
                 if (deactivation != null) {
@@ -283,8 +284,8 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
             deactivations.remove(guildId);
         }
         catalogueCache.remove(guildId);
-        if (transitionToSchedule != null) {
-            scheduleTransition(transitionToSchedule);
+        if (predecessor != null) {
+            scheduleTransition(predecessor);
         }
         return session;
     }
@@ -353,15 +354,15 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         }
     }
 
-    private void submitRefresh(Guild guild, GuildSession session) {
+    private void submitRefresh(Guild guild, GuildSession session, long refreshOwner) {
         if (!isOpen()) {
-            session.abortRefresh();
+            session.abortRefresh(refreshOwner);
             return;
         }
         try {
-            executor.execute(() -> runRefreshes(guild, session));
+            executor.execute(() -> runRefreshes(guild, session, refreshOwner));
         } catch (RejectedExecutionException exception) {
-            session.abortRefresh();
+            session.abortRefresh(refreshOwner);
             if (isOpen()) {
                 logger.warn("Impossible de planifier le rafraîchissement de la guilde {}",
                         session.guildId(), exception);
@@ -369,7 +370,7 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         }
     }
 
-    private void runRefreshes(Guild guild, GuildSession session) {
+    private void runRefreshes(Guild guild, GuildSession session, long refreshOwner) {
         try {
             boolean trailing;
             do {
@@ -384,10 +385,10 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
                     logger.warn("Échec du rafraîchissement du catalogue de la guilde {}",
                             session.guildId(), exception);
                 }
-                trailing = session.completeRefresh();
+                trailing = session.completeRefresh(refreshOwner);
             } while (trailing);
         } finally {
-            session.abortRefresh();
+            session.abortRefresh(refreshOwner);
         }
     }
 
@@ -400,7 +401,8 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         if (previous != null && previous.predecessor() != null) {
             scheduleTransition(previous.predecessor());
         }
-        if (!transition.markScheduled()) {
+        if (!transition.claimScheduling()) {
+            transition.awaitSchedulingCompleted();
             return;
         }
         try {
@@ -413,6 +415,8 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
                 logger.warn("Impossible de planifier le nettoyage de la guilde {}",
                         transition.guildId(), exception);
             }
+        } finally {
+            transition.completeScheduling();
         }
     }
 
@@ -642,8 +646,7 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         private final ReentrantReadWriteLock admissionGate = new ReentrantReadWriteLock(true);
         private volatile boolean accepting = true;
         private volatile boolean catalogueLoaded;
-        private boolean refreshRunning;
-        private boolean refreshTrailing;
+        private final RefreshState refreshState = new RefreshState();
 
         private GuildSession(String guildId, long epoch, Object guildLock, Transition predecessor) {
             this.guildId = guildId;
@@ -682,34 +685,19 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
 
         private synchronized void stopAccepting() {
             accepting = false;
-            refreshTrailing = false;
+            refreshState.stop();
         }
 
-        private synchronized boolean requestRefresh() {
-            if (!accepting) {
-                return false;
-            }
-            if (refreshRunning) {
-                refreshTrailing = true;
-                return false;
-            }
-            refreshRunning = true;
-            return true;
+        private long requestRefresh() {
+            return refreshState.request(accepting);
         }
 
-        private synchronized boolean completeRefresh() {
-            if (accepting && refreshTrailing) {
-                refreshTrailing = false;
-                return true;
-            }
-            refreshRunning = false;
-            refreshTrailing = false;
-            return false;
+        private boolean completeRefresh(long refreshOwner) {
+            return refreshState.complete(refreshOwner, accepting);
         }
 
-        private synchronized void abortRefresh() {
-            refreshRunning = false;
-            refreshTrailing = false;
+        private void abortRefresh(long refreshOwner) {
+            refreshState.abort(refreshOwner);
         }
 
         private boolean canObserveCatalogue() {
@@ -741,6 +729,52 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         }
     }
 
+    static final class RefreshState {
+        private long nextOwner;
+        private long activeOwner;
+        private boolean trailing;
+
+        synchronized long request(boolean accepting) {
+            if (!accepting) {
+                return 0L;
+            }
+            if (activeOwner != 0L) {
+                trailing = true;
+                return 0L;
+            }
+            nextOwner++;
+            if (nextOwner == 0L) {
+                nextOwner++;
+            }
+            activeOwner = nextOwner;
+            return activeOwner;
+        }
+
+        synchronized boolean complete(long owner, boolean accepting) {
+            if (activeOwner != owner) {
+                return false;
+            }
+            if (accepting && trailing) {
+                trailing = false;
+                return true;
+            }
+            activeOwner = 0L;
+            trailing = false;
+            return false;
+        }
+
+        synchronized void abort(long owner) {
+            if (activeOwner == owner) {
+                activeOwner = 0L;
+                trailing = false;
+            }
+        }
+
+        synchronized void stop() {
+            trailing = false;
+        }
+    }
+
     private static final class Admission implements AutoCloseable {
         private final Lock lock;
         private boolean closed;
@@ -762,7 +796,8 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         private final String guildId;
         private final GuildSession previous;
         private final CountDownLatch completed = new CountDownLatch(1);
-        private final AtomicBoolean scheduled = new AtomicBoolean();
+        private final AtomicBoolean schedulingClaimed = new AtomicBoolean();
+        private final CountDownLatch schedulingCompleted = new CountDownLatch(1);
         private volatile Deactivation deactivation;
 
         private Transition(String guildId, GuildSession previous) {
@@ -786,8 +821,16 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
             return deactivation;
         }
 
-        private boolean markScheduled() {
-            return scheduled.compareAndSet(false, true);
+        private boolean claimScheduling() {
+            return schedulingClaimed.compareAndSet(false, true);
+        }
+
+        private void completeScheduling() {
+            schedulingCompleted.countDown();
+        }
+
+        private void awaitSchedulingCompleted() {
+            awaitLatch(schedulingCompleted);
         }
 
         private boolean isCompleted() {
@@ -799,10 +842,14 @@ public class GuildRuntimeCoordinator implements AutoCloseable {
         }
 
         private void awaitCompleted() {
+            awaitLatch(completed);
+        }
+
+        private static void awaitLatch(CountDownLatch latch) {
             boolean interrupted = false;
             while (true) {
                 try {
-                    completed.await();
+                    latch.await();
                     break;
                 } catch (InterruptedException exception) {
                     interrupted = true;
