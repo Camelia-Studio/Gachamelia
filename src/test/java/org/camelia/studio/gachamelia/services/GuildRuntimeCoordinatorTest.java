@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
@@ -22,11 +23,17 @@ import java.util.Queue;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
@@ -103,6 +110,29 @@ class GuildRuntimeCoordinatorTest {
         coordinator.startGuild(guild);
         CatalogueEnvelope previous = cache.require("guild-1");
         api.loadFailures.add(new ApiException(502, "request_failed", "offline"));
+        coordinator.refreshGuild(guild);
+
+        assertThat(cache.find("guild-1")).containsSame(previous);
+    }
+
+    @Test
+    void malformedCatalogueNeverReplacesLastValidCatalogue() {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, new DirectExecutor(), new TestScheduler());
+        Guild guild = guild("guild-1");
+        coordinator.startGuild(guild);
+        CatalogueEnvelope previous = cache.require("guild-1");
+
+        api.catalogues.add(new CatalogueEnvelope(previous.server(), null, previous.catalogue()));
+        coordinator.refreshGuild(guild);
+        assertThat(cache.find("guild-1")).containsSame(previous);
+
+        api.catalogues.add(new CatalogueEnvelope(
+                previous.server(),
+                new ApiCatalogueValidation(true, null, List.of()),
+                new ApiCatalogue(null, List.of(), List.of(), List.of())
+        ));
         coordinator.refreshGuild(guild);
 
         assertThat(cache.find("guild-1")).containsSame(previous);
@@ -270,14 +300,14 @@ class GuildRuntimeCoordinatorTest {
         executor.runAll();
         coordinator.leaveGuild("guild-1");
         executor.runAll();
-        assertThat(api.deleteCalls).isEqualTo(1);
+        assertThat(api.deleteCalls).hasValue(1);
 
         coordinator.startGuild(guild);
         executor.runAll();
         scheduler.advanceToSeconds(10);
         executor.runAll();
 
-        assertThat(api.deleteCalls).isEqualTo(1);
+        assertThat(api.deleteCalls).hasValue(1);
         assertThat(api.calls.getLast()).isEqualTo("catalogue:guild-1");
     }
 
@@ -296,6 +326,146 @@ class GuildRuntimeCoordinatorTest {
         executor.runAllReversed();
 
         assertThat(api.calls).containsExactly("delete:guild-1");
+    }
+
+    @Test
+    void successfulDeactivationIsTerminalWithoutRetry() {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        ManualExecutor executor = new ManualExecutor();
+        TestScheduler scheduler = new TestScheduler();
+        GuildRuntimeCoordinator coordinator = coordinator(api, new GuildCatalogueCache(), executor, scheduler);
+
+        coordinator.startGuild(guild("guild-1"));
+        executor.runAll();
+        api.calls.clear();
+        coordinator.leaveGuild("guild-1");
+        executor.runAll();
+
+        assertThat(api.calls).containsExactly("delete:guild-1");
+        assertThat(scheduler.pendingTaskCount()).isZero();
+    }
+
+    @Test
+    void unavailableExpectationWaitsForGuildAvailableBeforeInitialization() {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        ManualExecutor executor = new ManualExecutor();
+        GuildRuntimeCoordinator coordinator = coordinator(api, new GuildCatalogueCache(), executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+
+        coordinator.expectUnavailableGuild(guild.getId());
+        executor.runAll();
+        assertThat(api.calls).isEmpty();
+
+        coordinator.guildAvailable(guild);
+        executor.runAll();
+
+        assertThat(api.calls).containsExactly("upsert:guild-1", "emojis:guild-1", "catalogue:guild-1");
+        assertThat(api.deleteCalls).hasValue(0);
+    }
+
+    @Test
+    void callsAfterCloseCannotCreateWorkOrExecuteRuntimeSupplier() {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        DirectExecutor executor = new DirectExecutor();
+        List<String> cancelled = new ArrayList<>();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler(), cancelled);
+        Guild guild = guild("guild-1");
+        coordinator.startGuild(guild);
+        api.calls.clear();
+        AtomicInteger runtimeCalls = new AtomicInteger();
+
+        coordinator.close();
+        coordinator.startGuild(guild);
+        coordinator.refreshGuild(guild);
+        coordinator.recoverGuild(guild);
+        coordinator.expectUnavailableGuild(guild.getId());
+        coordinator.guildAvailable(guild);
+        coordinator.leaveGuild(guild.getId());
+        coordinator.refreshGuildEmojis(guild);
+
+        assertThatThrownBy(() -> coordinator.executeRuntime(guild, () -> {
+            runtimeCalls.incrementAndGet();
+            return "unexpected";
+        })).isInstanceOf(GuildNotReadyException.class);
+        assertThat(runtimeCalls).hasValue(0);
+        assertThat(api.calls).isEmpty();
+        assertThat(cancelled).isEmpty();
+    }
+
+    @Test
+    void closeWinningDuringRefreshPreventsLateCacheReplacement() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+        coordinator.startGuild(guild);
+        assertThat(waitUntil(() -> cache.find(guild.getId()).isPresent())).isTrue();
+        CatalogueEnvelope previous = cache.require(guild.getId());
+        api.catalogues.add(unreadyEnvelope());
+        api.blockNextCatalogueLoad();
+
+        coordinator.refreshGuild(guild);
+        assertThat(api.awaitBlockedCatalogueLoad()).isTrue();
+        coordinator.close();
+        api.releaseCatalogueLoad();
+        assertThat(api.awaitCompletedCatalogueLoad()).isTrue();
+
+        assertThat(cache.find(guild.getId())).containsSame(previous);
+    }
+
+    @Test
+    void leaveWinningDuringRefreshKeepsCacheEmptyAndDeleteAsLastWrite() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(unreadyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+        List<String> readyGuilds = Collections.synchronizedList(new ArrayList<>());
+        coordinator.setReadyHandler(ready -> readyGuilds.add(ready.getId()));
+        coordinator.startGuild(guild);
+        assertThat(waitUntil(() -> cache.find(guild.getId()).isPresent())).isTrue();
+        api.calls.clear();
+        api.catalogues.add(readyEnvelope());
+        api.blockNextCatalogueLoad();
+
+        coordinator.refreshGuild(guild);
+        assertThat(api.awaitBlockedCatalogueLoad()).isTrue();
+        coordinator.leaveGuild(guild.getId());
+        api.releaseCatalogueLoad();
+        assertThat(api.awaitCompletedCatalogueLoad()).isTrue();
+        assertThat(waitUntil(() -> api.deleteCalls.get() == 1)).isTrue();
+
+        assertThat(cache.find(guild.getId())).isEmpty();
+        assertThat(readyGuilds).isEmpty();
+        assertThat(api.calls.getLast()).isEqualTo("delete:guild-1");
+        coordinator.close();
+    }
+
+    @Test
+    void leaveWinningBeforeReadyDispatchCancelsSignal() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        GatedSecondTaskExecutor executor = new GatedSecondTaskExecutor();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        AtomicInteger readyCalls = new AtomicInteger();
+        coordinator.setReadyHandler(ignored -> readyCalls.incrementAndGet());
+
+        try {
+            coordinator.startGuild(guild("guild-1"));
+            assertThat(executor.awaitFirstTaskCompleted()).isTrue();
+            assertThat(executor.awaitSecondTaskBlocked()).isTrue();
+
+            coordinator.leaveGuild("guild-1");
+            executor.releaseSecondTask();
+            assertThat(executor.awaitIdle()).isTrue();
+
+            assertThat(readyCalls).hasValue(0);
+        } finally {
+            executor.releaseSecondTask();
+            coordinator.close();
+        }
     }
 
     private static GuildRuntimeCoordinator coordinator(
@@ -372,14 +542,29 @@ class GuildRuntimeCoordinatorTest {
         return null;
     }
 
+    private static boolean waitUntil(java.util.function.BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return condition.getAsBoolean();
+    }
+
     private static final class RecordingBotApiService extends BotApiService {
-        private final List<String> calls = new ArrayList<>();
-        private final Queue<CatalogueEnvelope> catalogues = new ArrayDeque<>();
-        private final Queue<RuntimeException> loadFailures = new ArrayDeque<>();
-        private final Queue<RuntimeException> emojiFailures = new ArrayDeque<>();
-        private final Queue<RuntimeException> deactivateFailures = new ArrayDeque<>();
-        private CatalogueEnvelope currentCatalogue;
-        private int deleteCalls;
+        private final List<String> calls = Collections.synchronizedList(new ArrayList<>());
+        private final Queue<CatalogueEnvelope> catalogues = new ConcurrentLinkedQueue<>();
+        private final Queue<RuntimeException> loadFailures = new ConcurrentLinkedQueue<>();
+        private final Queue<RuntimeException> emojiFailures = new ConcurrentLinkedQueue<>();
+        private final Queue<RuntimeException> deactivateFailures = new ConcurrentLinkedQueue<>();
+        private final Semaphore catalogueLoadEntered = new Semaphore(0);
+        private final Semaphore catalogueLoadRelease = new Semaphore(0);
+        private final Semaphore catalogueLoadCompleted = new Semaphore(0);
+        private volatile CatalogueEnvelope currentCatalogue;
+        private volatile boolean blockNextCatalogueLoad;
+        private final AtomicInteger deleteCalls = new AtomicInteger();
 
         private RecordingBotApiService(CatalogueEnvelope catalogue) {
             super(null, null, null);
@@ -395,12 +580,18 @@ class GuildRuntimeCoordinatorTest {
         @Override
         public CatalogueEnvelope loadCatalogue(String guildId) {
             calls.add("catalogue:" + guildId);
+            if (blockNextCatalogueLoad) {
+                blockNextCatalogueLoad = false;
+                catalogueLoadEntered.release();
+                catalogueLoadRelease.acquireUninterruptibly();
+            }
             if (!loadFailures.isEmpty()) {
                 throw loadFailures.remove();
             }
             if (!catalogues.isEmpty()) {
                 currentCatalogue = catalogues.remove();
             }
+            catalogueLoadCompleted.release();
             return currentCatalogue;
         }
 
@@ -416,11 +607,70 @@ class GuildRuntimeCoordinatorTest {
         @Override
         public DiscordServerEnvelope deactivateGuild(String guildId) {
             calls.add("delete:" + guildId);
-            deleteCalls++;
+            deleteCalls.incrementAndGet();
             if (!deactivateFailures.isEmpty()) {
                 throw deactivateFailures.remove();
             }
             return new DiscordServerEnvelope(currentCatalogue.server());
+        }
+
+        private void blockNextCatalogueLoad() {
+            blockNextCatalogueLoad = true;
+            catalogueLoadCompleted.drainPermits();
+        }
+
+        private boolean awaitBlockedCatalogueLoad() throws InterruptedException {
+            return catalogueLoadEntered.tryAcquire(2, TimeUnit.SECONDS);
+        }
+
+        private void releaseCatalogueLoad() {
+            catalogueLoadRelease.release();
+        }
+
+        private boolean awaitCompletedCatalogueLoad() throws InterruptedException {
+            return catalogueLoadCompleted.tryAcquire(2, TimeUnit.SECONDS);
+        }
+    }
+
+    private static final class GatedSecondTaskExecutor extends ThreadPoolExecutor {
+        private final AtomicInteger startedTasks = new AtomicInteger();
+        private final CountDownLatch firstTaskCompleted = new CountDownLatch(1);
+        private final CountDownLatch secondTaskBlocked = new CountDownLatch(1);
+        private final Semaphore secondTaskRelease = new Semaphore(0);
+
+        private GatedSecondTaskExecutor() {
+            super(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+        }
+
+        @Override
+        protected void beforeExecute(Thread thread, Runnable runnable) {
+            if (startedTasks.incrementAndGet() == 2) {
+                secondTaskBlocked.countDown();
+                secondTaskRelease.acquireUninterruptibly();
+            }
+        }
+
+        @Override
+        protected void afterExecute(Runnable runnable, Throwable throwable) {
+            if (startedTasks.get() == 1) {
+                firstTaskCompleted.countDown();
+            }
+        }
+
+        private boolean awaitFirstTaskCompleted() throws InterruptedException {
+            return firstTaskCompleted.await(2, TimeUnit.SECONDS);
+        }
+
+        private boolean awaitSecondTaskBlocked() throws InterruptedException {
+            return secondTaskBlocked.await(500, TimeUnit.MILLISECONDS);
+        }
+
+        private void releaseSecondTask() {
+            secondTaskRelease.release();
+        }
+
+        private boolean awaitIdle() throws InterruptedException {
+            return waitUntil(() -> getActiveCount() == 0 && getQueue().isEmpty());
         }
     }
 
