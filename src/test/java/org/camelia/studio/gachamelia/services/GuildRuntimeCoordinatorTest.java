@@ -215,6 +215,149 @@ class GuildRuntimeCoordinatorTest {
     }
 
     @Test
+    void emojiRecoverySignalsReadyAfterAFalseToTrueCatalogueTransition() {
+        RecordingBotApiService api = new RecordingBotApiService(unreadyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, new DirectExecutor(), new TestScheduler());
+        List<String> readyGuilds = new ArrayList<>();
+        coordinator.setReadyHandler(guild -> readyGuilds.add(guild.getId()));
+        Guild guild = guild("guild-1");
+        coordinator.startGuild(guild);
+        api.catalogues.add(readyEnvelope());
+        api.emojiFailures.add(new ApiException(409, "server_inactive", "inactive"));
+
+        coordinator.refreshGuildEmojis(guild);
+
+        assertThat(readyGuilds).containsExactly("guild-1");
+        assertThat(cache.findReady(guild.getId())).isPresent();
+    }
+
+    @Test
+    void rejoinDuringOldCleanupKeepsTheNewCacheAndReconciliation() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                2, 2, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>()
+        );
+        CountDownLatch cancellationEntered = new CountDownLatch(1);
+        Semaphore cancellationRelease = new Semaphore(0);
+        AtomicInteger cancellations = new AtomicInteger();
+        GuildRuntimeCoordinator coordinator = new GuildRuntimeCoordinator(
+                api,
+                cache,
+                ignored -> {
+                    cancellations.incrementAndGet();
+                    cancellationEntered.countDown();
+                    cancellationRelease.acquireUninterruptibly();
+                },
+                executor,
+                new TestScheduler()
+        );
+        Guild guild = guild("guild-1");
+        Thread leaveThread = null;
+
+        try {
+            coordinator.startGuild(guild);
+            assertThat(waitUntil(() -> cache.findReady(guild.getId()).isPresent())).isTrue();
+            assertThat(waitUntil(() -> executor.getActiveCount() == 0 && executor.getQueue().isEmpty())).isTrue();
+            api.resetCatalogueLoadCompletion();
+
+            leaveThread = Thread.ofPlatform().daemon(true).name("guild-leave").start(
+                    () -> coordinator.leaveGuild(guild.getId())
+            );
+            assertThat(cancellationEntered.await(2, TimeUnit.SECONDS)).isTrue();
+
+            coordinator.startGuild(guild);
+            boolean synchronizedBeforeOldCleanup = api.awaitCompletedCatalogueLoad(300, TimeUnit.MILLISECONDS);
+            assertThat(cache.findReady(guild.getId())).isEmpty();
+            cancellationRelease.release();
+            leaveThread.join(2_000);
+            assertThat(waitUntil(() -> executor.getActiveCount() == 0 && executor.getQueue().isEmpty())).isTrue();
+
+            assertThat(synchronizedBeforeOldCleanup).isFalse();
+            assertThat(leaveThread.isAlive()).isFalse();
+            assertThat(cancellations).hasValue(1);
+            assertThat(cache.findReady(guild.getId())).isPresent();
+        } finally {
+            cancellationRelease.release();
+            if (leaveThread != null) {
+                leaveThread.join(2_000);
+            }
+            coordinator.close();
+        }
+    }
+
+    @Test
+    void leaveReturnsImmediatelyWhileAnAdmittedRefreshIsBlocked() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+        CountDownLatch leaveReturned = new CountDownLatch(1);
+
+        coordinator.startGuild(guild);
+        assertThat(waitUntil(() -> cache.findReady(guild.getId()).isPresent())).isTrue();
+        api.calls.clear();
+        api.blockNextCatalogueLoad();
+        coordinator.refreshGuild(guild);
+        assertThat(api.awaitBlockedCatalogueLoad()).isTrue();
+
+        Thread leaveThread = Thread.ofPlatform().daemon(true).name("guild-leave").start(() -> {
+            coordinator.leaveGuild(guild.getId());
+            leaveReturned.countDown();
+        });
+        boolean returnedBeforeRelease = leaveReturned.await(300, TimeUnit.MILLISECONDS);
+        boolean cacheRemovedBeforeRelease = cache.find(guild.getId()).isEmpty();
+        api.releaseCatalogueLoad();
+        leaveThread.join(2_000);
+        assertThat(waitUntil(() -> api.deleteCalls.get() == 1)).isTrue();
+        coordinator.close();
+
+        assertThat(returnedBeforeRelease).isTrue();
+        assertThat(cacheRemovedBeforeRelease).isTrue();
+        assertThat(api.calls.getLast()).isEqualTo("delete:guild-1");
+    }
+
+    @Test
+    void catalogueRefreshesCoalesceToOneActiveAndOneTrailingRun() throws Exception {
+        RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
+        GuildCatalogueCache cache = new GuildCatalogueCache();
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>()
+        );
+        GuildRuntimeCoordinator coordinator = coordinator(api, cache, executor, new TestScheduler());
+        Guild guild = guild("guild-1");
+
+        try {
+            coordinator.startGuild(guild);
+            assertThat(waitUntil(() -> cache.findReady(guild.getId()).isPresent())).isTrue();
+            assertThat(waitUntil(() -> executor.getActiveCount() == 0 && executor.getQueue().isEmpty())).isTrue();
+            api.calls.clear();
+            api.blockNextCatalogueLoad();
+
+            coordinator.refreshGuild(guild);
+            assertThat(api.awaitBlockedCatalogueLoad()).isTrue();
+            for (int refresh = 0; refresh < 5; refresh++) {
+                coordinator.refreshGuild(guild);
+            }
+            int queuedWhileBlocked = executor.getQueue().size();
+
+            api.releaseCatalogueLoad();
+            assertThat(waitUntil(() -> executor.getActiveCount() == 0 && executor.getQueue().isEmpty())).isTrue();
+            long catalogueCalls = List.copyOf(api.calls).stream()
+                    .filter(call -> call.equals("catalogue:guild-1"))
+                    .count();
+
+            assertThat(queuedWhileBlocked).isZero();
+            assertThat(catalogueCalls).isEqualTo(2);
+        } finally {
+            api.releaseCatalogueLoad();
+            coordinator.close();
+        }
+    }
+
+    @Test
     void leaveRemovesLocalStateCancelsReconciliationAndDeactivates() {
         RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
         GuildCatalogueCache cache = new GuildCatalogueCache();
@@ -229,8 +372,9 @@ class GuildRuntimeCoordinatorTest {
         coordinator.leaveGuild("guild-1");
 
         assertThat(cache.find("guild-1")).isEmpty();
-        assertThat(cancelled).containsExactly("guild-1");
+        assertThat(cancelled).isEmpty();
         executor.runAll();
+        assertThat(cancelled).containsExactly("guild-1");
         assertThat(api.calls).containsExactly("delete:guild-1");
     }
 
@@ -422,7 +566,7 @@ class GuildRuntimeCoordinatorTest {
     }
 
     @Test
-    void leaveWaitsForAdmittedRefreshAndKeepsDeleteAsLastWrite() throws Exception {
+    void leaveReturnsBeforeAdmittedRefreshAndKeepsDeleteAsLastWrite() throws Exception {
         RecordingBotApiService api = new RecordingBotApiService(unreadyEnvelope());
         GuildCatalogueCache cache = new GuildCatalogueCache();
         ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -441,17 +585,18 @@ class GuildRuntimeCoordinatorTest {
         assertThat(api.awaitBlockedCatalogueLoad()).isTrue();
         Thread leaveThread = new Thread(() -> coordinator.leaveGuild(guild.getId()), "guild-leave");
         leaveThread.start();
-        assertThat(waitUntil(() -> isWaiting(leaveThread) || !leaveThread.isAlive())).isTrue();
+        assertThat(waitUntil(() -> !leaveThread.isAlive())).isTrue();
         boolean leaveWaited = isWaiting(leaveThread);
         assertThat(cache.find(guild.getId())).isEmpty();
-        assertThat(cancelled).containsExactly(guild.getId());
+        assertThat(cancelled).isEmpty();
         api.releaseCatalogueLoad();
         assertThat(api.awaitCompletedCatalogueLoad()).isTrue();
         leaveThread.join(2_000);
         assertThat(waitUntil(() -> api.deleteCalls.get() == 1)).isTrue();
 
-        assertThat(leaveWaited).isTrue();
+        assertThat(leaveWaited).isFalse();
         assertThat(leaveThread.isAlive()).isFalse();
+        assertThat(cancelled).containsExactly(guild.getId());
         assertThat(cache.find(guild.getId())).isEmpty();
         assertThat(readyGuilds).isEmpty();
         assertThat(api.calls.getLast()).isEqualTo("delete:guild-1");
@@ -500,7 +645,7 @@ class GuildRuntimeCoordinatorTest {
     }
 
     @Test
-    void leaveWaitsForAdmittedRecoveryPostBeforeReturning() throws Exception {
+    void leaveReturnsBeforeAdmittedRecoveryPostCompletes() throws Exception {
         RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
         ManualExecutor lifecycleExecutor = new ManualExecutor();
         GuildRuntimeCoordinator coordinator = coordinator(
@@ -534,18 +679,19 @@ class GuildRuntimeCoordinatorTest {
             leaveOrder.set(sequence.incrementAndGet());
         }, "guild-leave");
         leaveThread.start();
-        assertThat(waitUntil(() -> isWaiting(leaveThread) || !leaveThread.isAlive())).isTrue();
+        assertThat(waitUntil(() -> !leaveThread.isAlive())).isTrue();
         boolean leaveWaited = isWaiting(leaveThread);
         api.releaseUpsert();
         runtimeThread.join(2_000);
         leaveThread.join(2_000);
 
-        assertThat(leaveWaited).isTrue();
-        assertThat(postOrder).hasValue(1);
-        assertThat(leaveOrder).hasValue(2);
+        assertThat(leaveWaited).isFalse();
+        assertThat(leaveOrder).hasValue(1);
+        assertThat(postOrder).hasValue(2);
         assertThat(runtimeFailure.get()).isInstanceOf(GuildNotReadyException.class);
         assertThat(runtimeThread.isAlive()).isFalse();
         assertThat(leaveThread.isAlive()).isFalse();
+        lifecycleExecutor.runAll();
         coordinator.close();
     }
 
@@ -589,12 +735,12 @@ class GuildRuntimeCoordinatorTest {
 
         Thread leaveThread = new Thread(() -> coordinator.leaveGuild(guild.getId()), "guild-leave");
         leaveThread.start();
-        assertThat(waitUntil(() -> isWaiting(leaveThread))).isTrue();
+        leaveThread.join(2_000);
+        assertThat(leaveThread.isAlive()).isFalse();
         firstSupplierRelease.release();
-        assertThat(waitUntil(() -> isWaiting(recoveryThread) || !recoveryThread.isAlive())).isTrue();
-        boolean recoveryWaitedForAdmission = isWaiting(recoveryThread);
+        recoveryThread.join(2_000);
 
-        assertThat(recoveryWaitedForAdmission).isTrue();
+        assertThat(recoveryThread.isAlive()).isFalse();
         assertThat(api.calls).doesNotContain("upsert:guild-1");
         holderRelease.release();
         holderThread.join(2_000);
@@ -602,15 +748,17 @@ class GuildRuntimeCoordinatorTest {
         leaveThread.join(2_000);
         assertThat(recoveryFailure.get()).isInstanceOf(GuildNotReadyException.class);
         assertThat(api.calls).doesNotContain("upsert:guild-1");
+        lifecycleExecutor.runAll();
         coordinator.close();
     }
 
     @Test
-    void leaveWaitsForAdmittedReadyHandlerBeforeReturning() throws Exception {
+    void leaveReturnsBeforeAdmittedReadyHandlerCompletes() throws Exception {
         RecordingBotApiService api = new RecordingBotApiService(readyEnvelope());
         ExecutorService executor = Executors.newSingleThreadExecutor();
         GuildRuntimeCoordinator coordinator = coordinator(api, new GuildCatalogueCache(), executor, new TestScheduler());
         CountDownLatch handlerEntered = new CountDownLatch(1);
+        CountDownLatch handlerCompleted = new CountDownLatch(1);
         Semaphore handlerRelease = new Semaphore(0);
         AtomicInteger sequence = new AtomicInteger();
         AtomicInteger handlerOrder = new AtomicInteger();
@@ -619,6 +767,7 @@ class GuildRuntimeCoordinatorTest {
             handlerEntered.countDown();
             handlerRelease.acquireUninterruptibly();
             handlerOrder.set(sequence.incrementAndGet());
+            handlerCompleted.countDown();
         });
 
         coordinator.startGuild(guild("guild-1"));
@@ -628,14 +777,15 @@ class GuildRuntimeCoordinatorTest {
             leaveOrder.set(sequence.incrementAndGet());
         }, "guild-leave");
         leaveThread.start();
-        assertThat(waitUntil(() -> isWaiting(leaveThread) || !leaveThread.isAlive())).isTrue();
+        assertThat(waitUntil(() -> !leaveThread.isAlive())).isTrue();
         boolean leaveWaited = isWaiting(leaveThread);
         handlerRelease.release();
+        assertThat(handlerCompleted.await(2, TimeUnit.SECONDS)).isTrue();
         leaveThread.join(2_000);
 
-        assertThat(leaveWaited).isTrue();
-        assertThat(handlerOrder).hasValue(1);
-        assertThat(leaveOrder).hasValue(2);
+        assertThat(leaveWaited).isFalse();
+        assertThat(leaveOrder).hasValue(1);
+        assertThat(handlerOrder).hasValue(2);
         assertThat(leaveThread.isAlive()).isFalse();
         coordinator.close();
     }
@@ -760,7 +910,8 @@ class GuildRuntimeCoordinatorTest {
             Thread activeLeaveThread = new Thread(() -> coordinator.leaveGuild("guild-1"), "guild-leave");
             leaveThread = activeLeaveThread;
             activeLeaveThread.start();
-            assertThat(waitUntil(() -> isWaiting(activeLeaveThread))).isTrue();
+            activeLeaveThread.join(2_000);
+            assertThat(activeLeaveThread.isAlive()).isFalse();
             executor.releaseSecondTask();
             assertThat(executor.awaitWorkerWaiting()).isTrue();
             holderRelease.release();
@@ -961,6 +1112,14 @@ class GuildRuntimeCoordinatorTest {
 
         private boolean awaitCompletedCatalogueLoad() throws InterruptedException {
             return catalogueLoadCompleted.tryAcquire(2, TimeUnit.SECONDS);
+        }
+
+        private boolean awaitCompletedCatalogueLoad(long timeout, TimeUnit unit) throws InterruptedException {
+            return catalogueLoadCompleted.tryAcquire(timeout, unit);
+        }
+
+        private void resetCatalogueLoadCompletion() {
+            catalogueLoadCompleted.drainPermits();
         }
 
         private void blockNextUpsert() {
