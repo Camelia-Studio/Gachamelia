@@ -58,8 +58,8 @@ public class Gachamelia {
             botEmojiScheduler = new BotEmojiScheduler(apiClient, emojiSnapshotService);
             emojiRefreshDebouncer = new GuildEmojiRefreshDebouncer(apiClient, emojiSnapshotService, Duration.ofSeconds(3));
             CatalogueMessageService catalogueMessageService = new CatalogueMessageService(RandomGenerator.getDefault());
-            CommandManager commandManager = new CommandManager(botApiService, catalogueCache);
             coordinator = new GuildRuntimeCoordinator(botApiService, catalogueCache, runtimeConfiguration, ignored -> { });
+            CommandManager commandManager = new CommandManager(botApiService, coordinator);
             catalogueRefreshScheduler = new CatalogueRefreshScheduler(coordinator, runtimeConfiguration);
             ReadyListener readyListener = new ReadyListener(coordinator, botEmojiScheduler, catalogueRefreshScheduler);
 
@@ -71,7 +71,6 @@ public class Gachamelia {
             new ListenerManager(
                     commandManager,
                     botApiService,
-                    catalogueCache,
                     catalogueMessageService,
                     emojiRefreshDebouncer,
                     coordinator

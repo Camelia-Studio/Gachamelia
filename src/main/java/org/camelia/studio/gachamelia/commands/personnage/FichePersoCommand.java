@@ -14,7 +14,8 @@ import org.camelia.studio.gachamelia.api.dto.ApiUserStat;
 import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
 import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
-import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
+import org.camelia.studio.gachamelia.services.GuildNotReadyException;
+import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
 import org.slf4j.Logger;
@@ -28,11 +29,11 @@ public class FichePersoCommand implements ISlashCommand {
     private static final Logger logger = LoggerFactory.getLogger(FichePersoCommand.class);
 
     private final BotApiService botApiService;
-    private final GuildCatalogueCache catalogueCache;
+    private final GuildRuntimeCoordinator coordinator;
 
-    public FichePersoCommand(BotApiService botApiService, GuildCatalogueCache catalogueCache) {
+    public FichePersoCommand(BotApiService botApiService, GuildRuntimeCoordinator coordinator) {
         this.botApiService = botApiService;
-        this.catalogueCache = catalogueCache;
+        this.coordinator = coordinator;
     }
 
     @Override
@@ -67,16 +68,25 @@ public class FichePersoCommand implements ISlashCommand {
             return;
         }
 
+        if (coordinator.findReadyCatalogue(event.getGuild().getId()).isEmpty()) {
+            event.getHook().editOriginal("Ce serveur n'est pas encore prêt pour Gachamélia.").queue();
+            return;
+        }
+
         try {
             EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
-            UserEnvelope envelope = botApiService.ensureUser(event.getGuild().getId(), member.getId());
+            UserEnvelope envelope = coordinator.executeRuntime(
+                    event.getGuild(),
+                    () -> botApiService.ensureUser(event.getGuild().getId(), member.getId())
+            );
             if (envelope.user() == null || envelope.user().rank() == null || envelope.user().role() == null) {
                 event.getHook().editOriginal("La fiche de personnage n'a pas pu être chargée").queue();
                 return;
             }
 
             ApiUser user = envelope.user();
-            CatalogueEnvelope catalogue = catalogueCache.require(event.getGuild().getId());
+            CatalogueEnvelope catalogue = coordinator.findReadyCatalogue(event.getGuild().getId())
+                    .orElseThrow(() -> new GuildNotReadyException(event.getGuild().getId()));
             Role role = event.getGuild().getRoleById(user.rank().discordId());
             Color color = role != null && role.getColors().getPrimary() != null ? role.getColors().getPrimary() : Color.WHITE;
             Optional<ApiRole> catalogueRole = catalogue.catalogue().roles().stream()
@@ -117,6 +127,8 @@ public class FichePersoCommand implements ISlashCommand {
             )).queue();
 
             event.getHook().editOriginal("Fiche de personnage de %s".formatted(member.getEffectiveName())).queue();
+        } catch (GuildNotReadyException exception) {
+            event.getHook().editOriginal("Ce serveur n'est pas encore prêt pour Gachamélia.").queue();
         } catch (RuntimeException exception) {
             logger.error(
                     "Impossible de charger la fiche perso pour le serveur {} et le membre {}",

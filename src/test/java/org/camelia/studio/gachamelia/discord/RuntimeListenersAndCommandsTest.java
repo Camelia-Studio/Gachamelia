@@ -31,6 +31,7 @@ import net.dv8tion.jda.api.requests.restaction.WebhookMessageEditAction;
 import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.api.ApiException;
 import org.camelia.studio.gachamelia.api.dto.ApiCatalogue;
+import org.camelia.studio.gachamelia.api.dto.ApiCatalogueValidation;
 import org.camelia.studio.gachamelia.api.dto.ApiDiscordServer;
 import org.camelia.studio.gachamelia.api.dto.ApiElement;
 import org.camelia.studio.gachamelia.api.dto.ApiEmoji;
@@ -53,6 +54,8 @@ import org.camelia.studio.gachamelia.managers.CommandManager;
 import org.camelia.studio.gachamelia.services.CatalogueMessageService;
 import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
+import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
+import org.camelia.studio.gachamelia.utils.RuntimeConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -68,6 +71,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -78,7 +82,10 @@ class RuntimeListenersAndCommandsTest {
         List<Collection<? extends CommandData>> registeredCommands = new ArrayList<>();
         JDA jda = jdaForCommandRegistration(registeredCommands);
 
-        CommandManager manager = new CommandManager(new RecordingBotApiService(sampleUserEnvelope()), catalogueCacheWith(sampleCatalogue("10", "11", "12")));
+        CommandManager manager = new CommandManager(
+                new RecordingBotApiService(sampleUserEnvelope()),
+                coordinatorWith(sampleCatalogue("10", "11", "12"))
+        );
 
         manager.registerCommands(jda);
 
@@ -91,8 +98,8 @@ class RuntimeListenersAndCommandsTest {
     @Test
     void fichePersoUsesApiPayloadScopedByGuild() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
-        FichePersoCommand command = new FichePersoCommand(botApiService, cache);
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        FichePersoCommand command = new FichePersoCommand(botApiService, coordinator);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
@@ -104,6 +111,7 @@ class RuntimeListenersAndCommandsTest {
         assertThat(botApiService.ensureUserCalls).isEqualTo(1);
         assertThat(botApiService.lastEnsureGuildId).isEqualTo("guild-1");
         assertThat(botApiService.lastEnsureUserId).isEqualTo("user-1");
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
         assertThat(capturedMessages.sentEmbeds).hasSize(1);
         MessageEmbed embed = capturedMessages.sentEmbeds.getFirst();
         assertThat(embed.getDescription()).contains("- Force : **7** (7 + 0)");
@@ -115,8 +123,7 @@ class RuntimeListenersAndCommandsTest {
     void fichePersoEditsOriginalWhenApiFailsAfterDeferReply() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         botApiService.ensureUserFailure = new ApiException(502, "api_user_missing", "boom");
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
-        FichePersoCommand command = new FichePersoCommand(botApiService, cache);
+        FichePersoCommand command = new FichePersoCommand(botApiService, coordinatorWith(sampleCatalogue("10", "11", "12")));
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
@@ -130,9 +137,9 @@ class RuntimeListenersAndCommandsTest {
     }
 
     @Test
-    void fichePersoEditsOriginalWhenCatalogueCacheIsMissingAfterDeferReply() {
+    void fichePersoExplainsWhenCatalogueIsMissing() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        FichePersoCommand command = new FichePersoCommand(botApiService, new GuildCatalogueCache());
+        FichePersoCommand command = new FichePersoCommand(botApiService, coordinatorWith(null));
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
@@ -142,15 +149,35 @@ class RuntimeListenersAndCommandsTest {
         command.execute(event);
 
         assertThat(capturedMessages.sentEmbeds).isEmpty();
-        assertThat(capturedMessages.editedOriginalMessages).containsExactly("La fiche de personnage n'a pas pu être chargée");
+        assertThat(capturedMessages.editedOriginalMessages)
+                .containsExactly("Ce serveur n'est pas encore prêt pour Gachamélia.");
+    }
+
+    @Test
+    void fichePersoExplainsWhenGuildIsNotReady() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(unreadyCatalogue("10", "11", "12"));
+        FichePersoCommand command = new FichePersoCommand(botApiService, coordinator);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", role("99", "Novice", Color.ORANGE)), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+
+        command.execute(slashCommandEvent("ficheperso", guild, member, null, capturedMessages));
+
+        assertThat(botApiService.ensureUserCalls).isZero();
+        assertThat(coordinator.executeRuntimeCalls).isZero();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+        assertThat(capturedMessages.editedOriginalMessages)
+                .containsExactly("Ce serveur n'est pas encore prêt pour Gachamélia.");
     }
 
     @Test
     void joinListenerUsesGuildCatalogueSettingsAndApiRank() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
         CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
-        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, cache, messageService);
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, coordinator, messageService);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.PINK);
@@ -163,18 +190,20 @@ class RuntimeListenersAndCommandsTest {
 
         assertThat(botApiService.ensureUserCalls).isEqualTo(1);
         assertThat(botApiService.lastEnsureGuildId).isEqualTo("guild-1");
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
         assertThat(capturedMessages.roleAssignments).containsExactly("user-1->99");
         assertThat(capturedMessages.sentEmbeds).hasSize(1);
-        assertThat(capturedMessages.sentEmbeds.getFirst().getDescription()).contains("Bienvenue %username%.");
+        assertThat(capturedMessages.sentEmbeds.getFirst().getDescription())
+                .contains("Bienvenue **Melaine**.")
+                .doesNotContain("%username%");
         assertThat(capturedMessages.sentEmbeds.getFirst().getDescription()).contains("Rôle « Comète »");
     }
 
     @Test
     void joinListenerAssignsRankRoleWhenWelcomeChannelIsMissing() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue(null, "11", "12"));
         CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
-        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, cache, messageService);
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, coordinatorWith(sampleCatalogue(null, "11", "12")), messageService);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.PINK);
@@ -192,9 +221,8 @@ class RuntimeListenersAndCommandsTest {
     void joinListenerReturnsCleanlyWhenEnsureUserFails() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         botApiService.ensureUserFailure = new ApiException(502, "api_user_missing", "boom");
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
         CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
-        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, cache, messageService);
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(botApiService, coordinatorWith(sampleCatalogue("10", "11", "12")), messageService);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.PINK);
@@ -209,11 +237,107 @@ class RuntimeListenersAndCommandsTest {
     }
 
     @Test
+    void memberListenersIgnoreUnreadyGuilds() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(unreadyCatalogue("10", "11", "12"));
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
+        GuildMemberJoinListener joinListener = new GuildMemberJoinListener(botApiService, coordinator, messageService);
+        GuildMemberLeaveListener leaveListener = new GuildMemberLeaveListener(botApiService, coordinator, messageService);
+        GuildMemberRoleChangeListener roleListener = new GuildMemberRoleChangeListener(botApiService, coordinator);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role staffRole = role("12", "Staff", Color.BLUE);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("12", staffRole), Map.of(), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of(staffRole));
+
+        joinListener.onGuildMemberJoin(new GuildMemberJoinEvent(jdaSelf(), 1L, member));
+        leaveListener.onGuildMemberRemove(new GuildMemberRemoveEvent(jdaSelf(), 2L, guild, member.getUser(), member));
+        roleListener.onGuildMemberRoleAdd(new GuildMemberRoleAddEvent(jdaSelf(), 3L, member, List.of(staffRole)));
+
+        assertThat(botApiService.ensureUserCalls).isZero();
+        assertThat(botApiService.ensureStaffUserCalls).isZero();
+        assertThat(coordinator.executeRuntimeCalls).isZero();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+    }
+
+    @Test
+    void memberListenersIgnoreBotsByDefault() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."));
+        GuildMemberJoinListener joinListener = new GuildMemberJoinListener(botApiService, coordinator, messageService);
+        GuildMemberLeaveListener leaveListener = new GuildMemberLeaveListener(botApiService, coordinator, messageService);
+        GuildMemberRoleChangeListener roleListener = new GuildMemberRoleChangeListener(botApiService, coordinator);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role staffRole = role("12", "Staff", Color.BLUE);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("12", staffRole), Map.of(), capturedMessages, null);
+        Member member = member("bot-1", "DailyMuse", guild, List.of(staffRole), true);
+
+        joinListener.onGuildMemberJoin(new GuildMemberJoinEvent(jdaSelf(), 1L, member));
+        leaveListener.onGuildMemberRemove(new GuildMemberRemoveEvent(jdaSelf(), 2L, guild, member.getUser(), member));
+        roleListener.onGuildMemberRoleAdd(new GuildMemberRoleAddEvent(jdaSelf(), 3L, member, List.of(staffRole)));
+
+        assertThat(botApiService.ensureUserCalls).isZero();
+        assertThat(botApiService.ensureStaffUserCalls).isZero();
+        assertThat(coordinator.executeRuntimeCalls).isZero();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+    }
+
+    @Test
+    void joinListenerSynchronizesBotsWhenEnabled() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue(null, "11", "12"));
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(
+                botApiService,
+                coordinator,
+                new FixedCatalogueMessageService(Optional.empty()),
+                true
+        );
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.PINK);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of(), capturedMessages, null);
+        Member member = member("bot-1", "DailyMuse", guild, List.of(), true);
+
+        listener.onGuildMemberJoin(new GuildMemberJoinEvent(jdaSelf(), 1L, member));
+
+        assertThat(botApiService.ensureUserCalls).isEqualTo(1);
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
+        assertThat(capturedMessages.roleAssignments).containsExactly("bot-1->99");
+    }
+
+    @Test
+    void joinListenerRechecksReadinessAfterRuntimeApiCall() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        coordinator.invalidateAfterRuntimeCall();
+        GuildMemberJoinListener listener = new GuildMemberJoinListener(
+                botApiService,
+                coordinator,
+                new FixedCatalogueMessageService(Optional.of("Bienvenue %username%."))
+        );
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.PINK);
+        TextChannel welcomeChannel = textChannel("10", capturedMessages);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of("10", welcomeChannel), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+
+        listener.onGuildMemberJoin(new GuildMemberJoinEvent(jdaSelf(), 1L, member));
+
+        assertThat(botApiService.ensureUserCalls).isEqualTo(1);
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
+        assertThat(capturedMessages.roleAssignments).isEmpty();
+        assertThat(capturedMessages.sentEmbeds).isEmpty();
+    }
+
+    @Test
     void leaveListenerUsesByeChannelAndFormatsUsername() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
         CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("A bientôt %username%."));
-        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, cache, messageService);
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, coordinator, messageService);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.CYAN);
@@ -227,8 +351,26 @@ class RuntimeListenersAndCommandsTest {
 
         assertThat(botApiService.ensureUserCalls).isEqualTo(1);
         assertThat(botApiService.lastEnsureGuildId).isEqualTo("guild-1");
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
         assertThat(capturedMessages.sentEmbeds).hasSize(1);
         assertThat(capturedMessages.sentEmbeds.getFirst().getDescription()).contains("A bientôt **Melaine**.");
+        assertThat(capturedMessages.sentEmbeds.getFirst().getTitle()).isEqualTo("Novice sortant");
+    }
+
+    @Test
+    void leaveListenerUsesFallbackTitleWhenByeTitleIsBlank() {
+        RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
+        CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("A bientôt %username%."));
+        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, coordinatorWith(sampleCatalogue("10", "11", "12", "   ")), messageService);
+
+        CapturedMessages capturedMessages = new CapturedMessages();
+        Role rankRole = role("99", "Novice", Color.CYAN);
+        TextChannel byeChannel = textChannel("11", capturedMessages);
+        Guild guild = guild("guild-1", "Gachamélia", "icon", Map.of("99", rankRole), Map.of("11", byeChannel), capturedMessages, null);
+        Member member = member("user-1", "Melaine", guild, List.of());
+
+        listener.onGuildMemberRemove(new GuildMemberRemoveEvent(jdaSelf(), 1L, guild, member.getUser(), member));
+
         assertThat(capturedMessages.sentEmbeds.getFirst().getTitle()).isEqualTo("Au revoir, Melaine !");
     }
 
@@ -236,7 +378,7 @@ class RuntimeListenersAndCommandsTest {
     void leaveListenerReturnsCleanlyWhenCatalogueCacheIsMissing() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         CatalogueMessageService messageService = new FixedCatalogueMessageService(Optional.of("A bientôt %username%."));
-        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, new GuildCatalogueCache(), messageService);
+        GuildMemberLeaveListener listener = new GuildMemberLeaveListener(botApiService, coordinatorWith(null), messageService);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.CYAN);
@@ -253,8 +395,8 @@ class RuntimeListenersAndCommandsTest {
     @Test
     void roleChangeListenerEnsuresStaffUserFromGuildSettings() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
-        GuildMemberRoleChangeListener listener = new GuildMemberRoleChangeListener(botApiService, cache);
+        RecordingGuildRuntimeCoordinator coordinator = coordinatorWith(sampleCatalogue("10", "11", "12"));
+        GuildMemberRoleChangeListener listener = new GuildMemberRoleChangeListener(botApiService, coordinator);
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.GREEN);
@@ -268,6 +410,7 @@ class RuntimeListenersAndCommandsTest {
         assertThat(botApiService.ensureStaffUserCalls).isEqualTo(1);
         assertThat(botApiService.lastEnsureGuildId).isEqualTo("guild-1");
         assertThat(botApiService.lastEnsureUserId).isEqualTo("user-1");
+        assertThat(coordinator.executeRuntimeCalls).isEqualTo(1);
         assertThat(capturedMessages.roleAssignments).containsExactly("user-1->99");
     }
 
@@ -275,8 +418,7 @@ class RuntimeListenersAndCommandsTest {
     void roleChangeListenerReturnsCleanlyWhenEnsureStaffUserFails() {
         RecordingBotApiService botApiService = new RecordingBotApiService(sampleUserEnvelope());
         botApiService.ensureStaffUserFailure = new ApiException(502, "api_user_missing", "boom");
-        GuildCatalogueCache cache = catalogueCacheWith(sampleCatalogue("10", "11", "12"));
-        GuildMemberRoleChangeListener listener = new GuildMemberRoleChangeListener(botApiService, cache);
+        GuildMemberRoleChangeListener listener = new GuildMemberRoleChangeListener(botApiService, coordinatorWith(sampleCatalogue("10", "11", "12")));
 
         CapturedMessages capturedMessages = new CapturedMessages();
         Role rankRole = role("99", "Novice", Color.GREEN);
@@ -306,6 +448,10 @@ class RuntimeListenersAndCommandsTest {
     }
 
     private static CatalogueEnvelope sampleCatalogue(String welcomeChannelId, String byeChannelId, String staffRoleId) {
+        return sampleCatalogue(welcomeChannelId, byeChannelId, staffRoleId, "Novice sortant");
+    }
+
+    private static CatalogueEnvelope sampleCatalogue(String welcomeChannelId, String byeChannelId, String staffRoleId, String byeTitle) {
         return new CatalogueEnvelope(
                 new ApiDiscordServer("guild-1", "Gachamélia", "icon", new ApiServerSettings(welcomeChannelId, byeChannelId, staffRoleId)),
                 new ApiCatalogue(
@@ -314,7 +460,7 @@ class RuntimeListenersAndCommandsTest {
                                 "99",
                                 "Novice",
                                 100,
-                                null,
+                                byeTitle,
                                 false,
                                 List.of(new ApiRankStat(5L, "Force", 100)),
                                 List.of(new ApiMessage(1L, "Bienvenue %username%.")),
@@ -324,6 +470,15 @@ class RuntimeListenersAndCommandsTest {
                         List.of(new ApiStat(5L, "Force")),
                         List.of(new ApiElement(3L, "Ambre", new ApiEmoji("unicode", "🌘", null, null, false, true, "🌘", null)))
                 )
+        );
+    }
+
+    private static CatalogueEnvelope unreadyCatalogue(String welcomeChannelId, String byeChannelId, String staffRoleId) {
+        CatalogueEnvelope readyCatalogue = sampleCatalogue(welcomeChannelId, byeChannelId, staffRoleId);
+        return new CatalogueEnvelope(
+                readyCatalogue.server(),
+                new ApiCatalogueValidation(false, List.of("role_catalogue_empty"), List.of()),
+                readyCatalogue.catalogue()
         );
     }
 
@@ -338,10 +493,9 @@ class RuntimeListenersAndCommandsTest {
         ));
     }
 
-    private static GuildCatalogueCache catalogueCacheWith(CatalogueEnvelope envelope) {
-        GuildCatalogueCache cache = new GuildCatalogueCache();
-        cache.put("guild-1", envelope);
-        return cache;
+    private static RecordingGuildRuntimeCoordinator coordinatorWith(CatalogueEnvelope envelope) {
+        return new RecordingGuildRuntimeCoordinator(Optional.ofNullable(envelope)
+                .filter(candidate -> candidate.validation().ready()));
     }
 
     private static JDA jdaForCommandRegistration(List<Collection<? extends CommandData>> registeredCommands) {
@@ -418,11 +572,16 @@ class RuntimeListenersAndCommandsTest {
     }
 
     private static Member member(String id, String effectiveName, Guild guild, List<Role> roles) {
+        return member(id, effectiveName, guild, roles, false);
+    }
+
+    private static Member member(String id, String effectiveName, Guild guild, List<Role> roles, boolean bot) {
         User user = proxy(
                 User.class,
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getId" -> id;
                     case "getEffectiveName", "getName" -> effectiveName;
+                    case "isBot" -> bot;
                     case "getAsTag" -> effectiveName + "#0001";
                     case "getEffectiveAvatarUrl", "getAvatarUrl" -> "https://cdn.test/" + id + ".png";
                     case "toString" -> "User[" + id + "]";
@@ -682,6 +841,41 @@ class RuntimeListenersAndCommandsTest {
             lastEnsureGuildId = guildId;
             lastEnsureUserId = userDiscordId;
             return envelope;
+        }
+    }
+
+    private static final class RecordingGuildRuntimeCoordinator extends GuildRuntimeCoordinator {
+        private Optional<CatalogueEnvelope> catalogue;
+        private int executeRuntimeCalls;
+        private boolean invalidateAfterRuntimeCall;
+
+        private RecordingGuildRuntimeCoordinator(Optional<CatalogueEnvelope> catalogue) {
+            super(
+                    new RecordingBotApiService(sampleUserEnvelope()),
+                    new GuildCatalogueCache(),
+                    new RuntimeConfiguration(Duration.ofMinutes(5), 1, false),
+                    ignored -> { }
+            );
+            this.catalogue = catalogue;
+        }
+
+        @Override
+        public Optional<CatalogueEnvelope> findReadyCatalogue(String guildId) {
+            return catalogue;
+        }
+
+        @Override
+        public <T> T executeRuntime(Guild guild, Supplier<T> operation) {
+            executeRuntimeCalls++;
+            T result = operation.get();
+            if (invalidateAfterRuntimeCall) {
+                catalogue = Optional.empty();
+            }
+            return result;
+        }
+
+        private void invalidateAfterRuntimeCall() {
+            invalidateAfterRuntimeCall = true;
         }
     }
 

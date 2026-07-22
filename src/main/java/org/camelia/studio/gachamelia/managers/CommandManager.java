@@ -8,7 +8,7 @@ import org.camelia.studio.gachamelia.api.BotApiService;
 import org.camelia.studio.gachamelia.commands.personnage.FichePersoCommand;
 import org.camelia.studio.gachamelia.commands.utils.PingCommand;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
-import org.camelia.studio.gachamelia.services.GuildCatalogueCache;
+import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,9 +18,9 @@ public class CommandManager {
     private final List<ISlashCommand> slashCommands;
     private final Logger logger = LoggerFactory.getLogger(CommandManager.class);
 
-    public CommandManager(BotApiService botApiService, GuildCatalogueCache catalogueCache) {
+    public CommandManager(BotApiService botApiService, GuildRuntimeCoordinator coordinator) {
         slashCommands = List.of(
-                new FichePersoCommand(botApiService, catalogueCache),
+                new FichePersoCommand(botApiService, coordinator),
                 new PingCommand()
         );
     }
