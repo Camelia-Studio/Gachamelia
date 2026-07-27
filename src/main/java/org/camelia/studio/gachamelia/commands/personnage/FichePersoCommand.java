@@ -7,19 +7,35 @@ import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEve
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import org.camelia.studio.gachamelia.api.BotApiService;
+import org.camelia.studio.gachamelia.api.dto.ApiRole;
+import org.camelia.studio.gachamelia.api.dto.ApiUser;
+import org.camelia.studio.gachamelia.api.dto.ApiUserStat;
+import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
+import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.interfaces.ISlashCommand;
-import org.camelia.studio.gachamelia.models.Element;
-import org.camelia.studio.gachamelia.models.User;
-import org.camelia.studio.gachamelia.models.UserStat;
-import org.camelia.studio.gachamelia.repositories.StatRepository;
-import org.camelia.studio.gachamelia.services.UserService;
+import org.camelia.studio.gachamelia.services.GuildNotReadyException;
+import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
 import org.camelia.studio.gachamelia.utils.Configuration;
 import org.camelia.studio.gachamelia.utils.EmbedUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.awt.*;
 import java.util.List;
+import java.util.Optional;
 
 public class FichePersoCommand implements ISlashCommand {
+    private static final Logger logger = LoggerFactory.getLogger(FichePersoCommand.class);
+
+    private final BotApiService botApiService;
+    private final GuildRuntimeCoordinator coordinator;
+
+    public FichePersoCommand(BotApiService botApiService, GuildRuntimeCoordinator coordinator) {
+        this.botApiService = botApiService;
+        this.coordinator = coordinator;
+    }
+
     @Override
     public String getName() {
         return "ficheperso";
@@ -52,47 +68,75 @@ public class FichePersoCommand implements ISlashCommand {
             return;
         }
 
-        EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
-        User user = UserService.getInstance().getOrCreateUser(member.getId());
-        Role role = event.getGuild().getRoleById(user.getRank().getDiscordId());
-        Color color = role != null && role.getColors().getPrimary() != null ? role.getColors().getPrimary() : Color.WHITE;
-        List<UserStat> stats = StatRepository.getInstance().getUserStats(user);
-
-        StringBuilder description = new StringBuilder("""
-                __Caractéristiques principales__ :
-                - Nom : **%s**
-                - Rareté : **%s**
-                - Rôle : **%s**
-                - Éléments : *%s*
-                - %s : **%d**
-                - Emblème : **%s**
-                __Statistiques de combat__ :
-                """.formatted(
-                member.getEffectiveName(),
-                user.getRank().getName(),
-                user.getRole().getName(),
-                user.getElements().stream().map(Element::getName).reduce("", (a, b) -> a + ", " + b).substring(2),
-                Configuration.getInstance().getDotenv().get("XP_EMOJI", "XP"),
-                0,
-                "Ø"
-        ));
-
-        for (UserStat stat : stats) {
-            int userStat = stat.getValue();
-            int equipmentStat = 0;
-            description.append("- %s : **%d** (%d + %d)\n".formatted(stat.getStat().getName(), userStat + equipmentStat, userStat, equipmentStat));
+        if (coordinator.findReadyCatalogue(event.getGuild().getId()).isEmpty()) {
+            event.getHook().editOriginal("Ce serveur n'est pas encore prêt pour Gachamélia.").queue();
+            return;
         }
 
-        embedGeneralite.setAuthor(member.getEffectiveName(), null, user.getRole().getImageUrl());
-        embedGeneralite.setTitle("Fiche de personnage");
-        embedGeneralite.setColor(color);
-        embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());
-        embedGeneralite.setDescription(description.toString());
+        try {
+            EmbedBuilder embedGeneralite = EmbedUtils.createDefaultEmbed(event.getJDA());
+            UserEnvelope envelope = coordinator.executeRuntime(
+                    event.getGuild(),
+                    () -> botApiService.ensureUser(event.getGuild().getId(), member.getId())
+            );
+            if (envelope.user() == null || envelope.user().rank() == null || envelope.user().role() == null) {
+                event.getHook().editOriginal("La fiche de personnage n'a pas pu être chargée").queue();
+                return;
+            }
 
-        event.getChannel().sendMessageEmbeds(List.of(
-                embedGeneralite.build()
-        )).queue();
+            ApiUser user = envelope.user();
+            CatalogueEnvelope catalogue = coordinator.findReadyCatalogue(event.getGuild().getId())
+                    .orElseThrow(() -> new GuildNotReadyException(event.getGuild().getId()));
+            Role role = event.getGuild().getRoleById(user.rank().discordId());
+            Color color = role != null && role.getColors().getPrimary() != null ? role.getColors().getPrimary() : Color.WHITE;
+            Optional<ApiRole> catalogueRole = catalogue.catalogue().roles().stream()
+                    .filter(candidate -> candidate.id() == user.role().id())
+                    .findFirst();
+            String emblem = catalogueRole.map(ApiRole::emoji).map(emoji -> emoji.markup() != null ? emoji.markup() : "Ø").orElse("Ø");
 
-        event.getHook().editOriginal("Fiche de personnage de %s".formatted(member.getEffectiveName())).queue();
+            StringBuilder description = new StringBuilder("""
+                    __Caractéristiques principales__ :
+                    - Nom : **%s**
+                    - Rareté : **%s**
+                    - Rôle : **%s**
+                    - Éléments : *%s*
+                    - %s : **%d**
+                    - Emblème : **%s**
+                    __Statistiques de combat__ :
+                    """.formatted(
+                    member.getEffectiveName(),
+                    user.rank().name(),
+                    user.role().name(),
+                    user.elements().stream().map(ApiUser.ApiElementSummary::name).reduce((a, b) -> a + ", " + b).orElse("Ø"),
+                    Configuration.getInstance().getDotenv().get("XP_EMOJI", "XP"),
+                    0,
+                    emblem
+            ));
+
+            for (ApiUserStat stat : user.stats()) {
+                description.append("- %s : **%d** (%d + %d)\n".formatted(stat.name(), stat.value(), stat.value(), 0));
+            }
+
+            embedGeneralite.setTitle("Fiche de personnage");
+            embedGeneralite.setColor(color);
+            embedGeneralite.setThumbnail(member.getUser().getEffectiveAvatarUrl());
+            embedGeneralite.setDescription(description.toString());
+
+            event.getChannel().sendMessageEmbeds(List.of(
+                    embedGeneralite.build()
+            )).queue();
+
+            event.getHook().editOriginal("Fiche de personnage de %s".formatted(member.getEffectiveName())).queue();
+        } catch (GuildNotReadyException exception) {
+            event.getHook().editOriginal("Ce serveur n'est pas encore prêt pour Gachamélia.").queue();
+        } catch (RuntimeException exception) {
+            logger.error(
+                    "Impossible de charger la fiche perso pour le serveur {} et le membre {}",
+                    event.getGuild().getId(),
+                    member.getId(),
+                    exception
+            );
+            event.getHook().editOriginal("La fiche de personnage n'a pas pu être chargée").queue();
+        }
     }
 }

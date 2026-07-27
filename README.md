@@ -6,6 +6,28 @@ Transforme ton serveur Discord en *gacha* géant !
 
 **Gachamélia** est un bot Discord qui va transformer ton serveur en un véritable *gacha* ! Cet outil est développé par la branche **CILA** de l'association **Camélia Studio**.
 
+## Configuration
+
+Le bot utilise l'API du backoffice comme source de vérité.
+
+Variables requises :
+
+- `BOT_TOKEN`
+- `API_BASE_URL`
+- `API_CLIENT_ID`
+- `API_CLIENT_SECRET`
+- `XP_EMOJI`
+- `APP_VERSION`
+- `APP_DESCRIPTION`
+
+Variables runtime optionnelles :
+
+- `CATALOGUE_REFRESH_INTERVAL_MINUTES` : fréquence de synchronisation des catalogues, `5` par défaut.
+- `MEMBER_SYNC_CONCURRENCY` : nombre maximal d'appels membres concurrents pour l'ensemble des serveurs, `4` par défaut.
+- `SYNC_BOT_MEMBERS` : inclut les comptes bots dans la réconciliation lorsqu'il vaut `true`, `false` par défaut.
+
+Un serveur dont l'API retourne `validation.ready=false` reste connecté, mais les fonctionnalités membres restent désactivées jusqu'à ce que son catalogue soit prêt.
+
 
 Liens utiles :
 
