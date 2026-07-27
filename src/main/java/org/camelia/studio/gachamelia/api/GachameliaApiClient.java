@@ -34,8 +34,8 @@ public class GachameliaApiClient {
         return sendAuthorized("POST", "/discord-servers", request, DiscordServerEnvelope.class, true);
     }
 
-    public DiscordServerEnvelope deactivateServer(String guildId) {
-        return sendAuthorized("DELETE", "/discord-servers/" + encode(guildId), null, DiscordServerEnvelope.class, true);
+    public void deactivateServer(String guildId) {
+        sendAuthorized("DELETE", "/discord-servers/" + encode(guildId), null, Void.class, true);
     }
 
     public EmojiSnapshotResponse refreshEmojis(EmojiSnapshotRequest request) {
@@ -66,6 +66,9 @@ public class GachameliaApiClient {
         }
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new ApiException(response.statusCode(), readErrorCode(response.body()), response.body());
+        }
+        if (responseType == Void.class) {
+            return null;
         }
         try {
             return objectMapper.readValue(response.body(), responseType);

@@ -1148,13 +1148,12 @@ class GuildRuntimeCoordinatorTest {
         }
 
         @Override
-        public DiscordServerEnvelope deactivateGuild(String guildId) {
+        public void deactivateGuild(String guildId) {
             calls.add("delete:" + guildId);
             deleteCalls.incrementAndGet();
             if (!deactivateFailures.isEmpty()) {
                 throw deactivateFailures.remove();
             }
-            return new DiscordServerEnvelope(currentCatalogue.server());
         }
 
         private void blockNextCatalogueLoad() {

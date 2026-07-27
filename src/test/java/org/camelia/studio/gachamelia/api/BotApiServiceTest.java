@@ -4,8 +4,12 @@ import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
 import org.camelia.studio.gachamelia.api.dto.ApiCatalogue;
 import org.camelia.studio.gachamelia.api.dto.ApiCatalogueValidation;
 import org.camelia.studio.gachamelia.api.dto.ApiDiscordServer;
+import org.camelia.studio.gachamelia.api.dto.ApiElement;
+import org.camelia.studio.gachamelia.api.dto.ApiRank;
+import org.camelia.studio.gachamelia.api.dto.ApiRole;
 import org.camelia.studio.gachamelia.api.dto.ApiServerLifecycle;
 import org.camelia.studio.gachamelia.api.dto.ApiServerSettings;
+import org.camelia.studio.gachamelia.api.dto.ApiStat;
 import org.camelia.studio.gachamelia.api.dto.CatalogueEnvelope;
 import org.camelia.studio.gachamelia.api.dto.DiscordServerEnvelope;
 import org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse;
@@ -33,7 +37,7 @@ class BotApiServiceTest {
         assertThat(service.upsertGuild(guild("guild-1"))).isSameAs(apiClient.serverEnvelope);
         assertThat(service.loadCatalogue("guild-1")).isSameAs(apiClient.catalogueEnvelope);
         assertThat(service.refreshGuildEmojis(guild("guild-1"))).isSameAs(apiClient.emojiResponse);
-        assertThat(service.deactivateGuild("guild-1")).isSameAs(apiClient.serverEnvelope);
+        service.deactivateGuild("guild-1");
 
         assertThat(apiClient.upsertServerCalls).isEqualTo(1);
         assertThat(apiClient.getCatalogueCalls).isEqualTo(1);
@@ -47,24 +51,70 @@ class BotApiServiceTest {
     }
 
     @Test
-    void loadCatalogueRejectsMissingServerLifecycle() {
+    void loadCatalogueAcceptsMissingServerLifecycle() {
         ApiDiscordServer server = new ApiDiscordServer("guild-1", "Gachamélia", "icon", null, new ApiServerSettings(null, null, null));
-        assertInvalidCatalogue(new CatalogueEnvelope(server, validEnvelope().validation(), validEnvelope().catalogue()), "Catalogue server lifecycle missing");
+        BotApiService service = new BotApiService(
+                new StubApiClient(new CatalogueEnvelope(server, validEnvelope().validation(), documentedCatalogue())),
+                new EmojiSnapshotService()
+        );
+
+        CatalogueEnvelope envelope = service.loadCatalogue("guild-1");
+
+        assertThat(envelope.server().lifecycle()).isNull();
+        assertThat(envelope.validation().ready()).isTrue();
     }
 
     @Test
-    void loadCatalogueRejectsMissingValidation() {
-        assertInvalidCatalogue(new CatalogueEnvelope(validEnvelope().server(), null, validEnvelope().catalogue()), "Catalogue validation missing");
+    void loadCatalogueAcceptsDocumentedEnvelopeWithoutExtensions() {
+        ApiDiscordServer server = new ApiDiscordServer("guild-1", "Gachamélia", "icon", null, new ApiServerSettings(null, null, null));
+        BotApiService service = new BotApiService(
+                new StubApiClient(new CatalogueEnvelope(server, null, documentedCatalogue())),
+                new EmojiSnapshotService()
+        );
+
+        CatalogueEnvelope envelope = service.loadCatalogue("guild-1");
+
+        assertThat(envelope.validation().ready()).isTrue();
+        assertThat(envelope.validation().errors()).isEmpty();
+        assertThat(envelope.validation().warnings()).isEmpty();
     }
 
     @Test
-    void loadCatalogueRejectsMissingValidationErrors() {
-        assertInvalidCatalogue(new CatalogueEnvelope(validEnvelope().server(), new ApiCatalogueValidation(true, null, List.of()), validEnvelope().catalogue()), "Catalogue validation errors missing");
+    void loadCatalogueNormalizesMissingValidationDetails() {
+        BotApiService service = new BotApiService(
+                new StubApiClient(new CatalogueEnvelope(
+                        validEnvelope().server(),
+                        new ApiCatalogueValidation(false, null, null),
+                        documentedCatalogue()
+                )),
+                new EmojiSnapshotService()
+        );
+
+        CatalogueEnvelope envelope = service.loadCatalogue("guild-1");
+
+        assertThat(envelope.validation().ready()).isFalse();
+        assertThat(envelope.validation().errors()).isEmpty();
+        assertThat(envelope.validation().warnings()).isEmpty();
     }
 
     @Test
-    void loadCatalogueRejectsMissingValidationWarnings() {
-        assertInvalidCatalogue(new CatalogueEnvelope(validEnvelope().server(), new ApiCatalogueValidation(true, List.of(), null), validEnvelope().catalogue()), "Catalogue validation warnings missing");
+    void loadCatalogueWithoutValidationMarksIncompleteCatalogueNotReady() {
+        ApiCatalogue catalogue = new ApiCatalogue(
+                documentedCatalogue().ranks(),
+                List.of(),
+                documentedCatalogue().stats(),
+                documentedCatalogue().elements()
+        );
+        BotApiService service = new BotApiService(
+                new StubApiClient(new CatalogueEnvelope(validEnvelope().server(), null, catalogue)),
+                new EmojiSnapshotService()
+        );
+
+        CatalogueEnvelope envelope = service.loadCatalogue("guild-1");
+
+        assertThat(envelope.validation().ready()).isFalse();
+        assertThat(envelope.validation().errors()).containsExactly("role_catalogue_empty");
+        assertThat(envelope.validation().warnings()).isEmpty();
     }
 
     @Test
@@ -92,6 +142,15 @@ class BotApiServiceTest {
                 new ApiDiscordServer("guild-1", "Gachamélia", "icon", new ApiServerLifecycle(true, null, null), new ApiServerSettings(null, null, null)),
                 new ApiCatalogueValidation(true, List.of(), List.of()),
                 new ApiCatalogue(List.of(), List.of(), List.of(), List.of())
+        );
+    }
+
+    private static ApiCatalogue documentedCatalogue() {
+        return new ApiCatalogue(
+                List.of(new ApiRank(1, "99", "Novice", 100, null, false, List.of(), List.of(), List.of())),
+                List.of(new ApiRole(2, "Comète", 100, null)),
+                List.of(new ApiStat(10, "Force")),
+                List.of(new ApiElement(3, "Ambre", null))
         );
     }
 
@@ -218,9 +277,8 @@ class BotApiServiceTest {
         }
 
         @Override
-        public org.camelia.studio.gachamelia.api.dto.DiscordServerEnvelope deactivateServer(String guildId) {
+        public void deactivateServer(String guildId) {
             deactivateServerCalls++;
-            return serverEnvelope;
         }
     }
 }
