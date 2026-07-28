@@ -147,8 +147,8 @@ class BotApiServiceTest {
 
     private static ApiCatalogue documentedCatalogue() {
         return new ApiCatalogue(
-                List.of(new ApiRank(1, "99", "Novice", 100, null, false, List.of(), List.of(), List.of())),
-                List.of(new ApiRole(2, "Comète", 100, null)),
+                List.of(new ApiRank(1, "99", "Novice", 100, null, false, List.of(), List.of())),
+                List.of(new ApiRole(2, "Comète", 100, null, List.of())),
                 List.of(new ApiStat(10, "Force")),
                 List.of(new ApiElement(3, "Ambre", null))
         );

@@ -37,8 +37,8 @@ import org.camelia.studio.gachamelia.api.dto.ApiElement;
 import org.camelia.studio.gachamelia.api.dto.ApiEmoji;
 import org.camelia.studio.gachamelia.api.dto.ApiMessage;
 import org.camelia.studio.gachamelia.api.dto.ApiRank;
-import org.camelia.studio.gachamelia.api.dto.ApiRankStat;
 import org.camelia.studio.gachamelia.api.dto.ApiRole;
+import org.camelia.studio.gachamelia.api.dto.ApiRoleStat;
 import org.camelia.studio.gachamelia.api.dto.ApiServerSettings;
 import org.camelia.studio.gachamelia.api.dto.ApiStat;
 import org.camelia.studio.gachamelia.api.dto.ApiUser;
@@ -462,11 +462,16 @@ class RuntimeListenersAndCommandsTest {
                                 100,
                                 byeTitle,
                                 false,
-                                List.of(new ApiRankStat(5L, "Force", 100)),
                                 List.of(new ApiMessage(1L, "Bienvenue %username%.")),
                                 List.of(new ApiMessage(2L, "A bientôt %username%."))
                         )),
-                        List.of(new ApiRole(2L, "Comète", 100, new ApiEmoji("server", null, "20", "comete", false, true, "<:comete:20>", null))),
+                        List.of(new ApiRole(
+                                2L,
+                                "Comète",
+                                100,
+                                new ApiEmoji("server", null, "20", "comete", false, true, "<:comete:20>", null),
+                                List.of(new ApiRoleStat(5L, "Force", 100))
+                        )),
                         List.of(new ApiStat(5L, "Force")),
                         List.of(new ApiElement(3L, "Ambre", new ApiEmoji("unicode", "🌘", null, null, false, true, "🌘", null)))
                 )
