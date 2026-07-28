@@ -39,7 +39,6 @@ class CatalogueEnvelopeTest {
                       "percentage": 35,
                       "bye_title": "Bye",
                       "is_staff": false,
-                      "stats": [{"id": 5, "name": "Force", "percentage": 70}],
                       "welcome_messages": [{"id": 6, "message": "Bienvenue %username%."}],
                       "bye_messages": [{"id": 7, "message": "A bientôt %username%."}]
                     }],
@@ -47,7 +46,8 @@ class CatalogueEnvelopeTest {
                       "id": 2,
                       "name": "Comète",
                       "percentage": 45,
-                      "emoji": {"source": "server", "unicode": null, "id": "20", "name": "comete", "animated": false, "available": true, "markup": "<:comete:20>", "cdn_url": null}
+                      "emoji": {"source": "server", "unicode": null, "id": "20", "name": "comete", "animated": false, "available": true, "markup": "<:comete:20>", "cdn_url": null},
+                      "stats": [{"id": 5, "name": "Force", "percentage": 70}]
                     }],
                     "stats": [{"id": 5, "name": "Force"}],
                     "elements": [{
@@ -74,5 +74,6 @@ class CatalogueEnvelopeTest {
         assertThat(envelope.catalogue().ranks()).hasSize(1);
         assertThat(envelope.catalogue().ranks().getFirst().welcomeMessages().getFirst().message())
                 .isEqualTo("Bienvenue %username%.");
+        assertThat(envelope.catalogue().roles().getFirst().stats().getFirst().percentage()).isEqualTo(70);
     }
 }

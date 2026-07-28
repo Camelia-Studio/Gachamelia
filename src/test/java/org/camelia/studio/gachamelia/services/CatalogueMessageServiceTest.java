@@ -39,7 +39,6 @@ class CatalogueMessageServiceTest {
                 35,
                 "Bye",
                 false,
-                List.of(),
                 List.of(new ApiMessage(1, "Bienvenue")),
                 List.of(new ApiMessage(2, "A bientôt"))
         );

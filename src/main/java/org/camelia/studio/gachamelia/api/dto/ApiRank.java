@@ -11,7 +11,6 @@ public record ApiRank(
         int percentage,
         @JsonProperty("bye_title") String byeTitle,
         @JsonProperty("is_staff") boolean staff,
-        List<ApiRankStat> stats,
         @JsonProperty("welcome_messages") List<ApiMessage> welcomeMessages,
         @JsonProperty("bye_messages") List<ApiMessage> byeMessages
 ) {
