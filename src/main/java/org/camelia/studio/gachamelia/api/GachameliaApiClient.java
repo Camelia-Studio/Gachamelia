@@ -9,6 +9,7 @@ import org.camelia.studio.gachamelia.api.dto.EmojiSnapshotRequest;
 import org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse;
 import org.camelia.studio.gachamelia.api.dto.EnsureUserRequest;
 import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
+import org.camelia.studio.gachamelia.api.dto.XpAwardEnvelope;
 import org.camelia.studio.gachamelia.api.http.ApiTransport;
 import org.camelia.studio.gachamelia.api.http.ApiTransportRequest;
 import org.camelia.studio.gachamelia.api.http.ApiTransportResponse;
@@ -52,6 +53,10 @@ public class GachameliaApiClient {
 
     public UserEnvelope ensureStaffUser(String guildId, String userDiscordId) {
         return sendAuthorized("PUT", userPath(guildId, userDiscordId), EnsureUserRequest.staff(), UserEnvelope.class, true);
+    }
+
+    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source) {
+        return sendAuthorized("POST", userPath(guildId, userDiscordId) + "/xp", Map.of("source", source), XpAwardEnvelope.class, true);
     }
 
     private String userPath(String guildId, String userDiscordId) {

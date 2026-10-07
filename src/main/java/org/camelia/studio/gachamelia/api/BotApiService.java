@@ -7,6 +7,7 @@ import org.camelia.studio.gachamelia.api.dto.DiscordServerEnvelope;
 import org.camelia.studio.gachamelia.api.dto.DiscordServerUpsertRequest;
 import org.camelia.studio.gachamelia.api.dto.EmojiSnapshotResponse;
 import org.camelia.studio.gachamelia.api.dto.UserEnvelope;
+import org.camelia.studio.gachamelia.api.dto.XpAwardEnvelope;
 import org.camelia.studio.gachamelia.services.EmojiSnapshotService;
 
 import java.util.ArrayList;
@@ -50,6 +51,10 @@ public class BotApiService {
 
     public UserEnvelope ensureStaffUser(String guildId, String userDiscordId) {
         return apiClient.ensureStaffUser(guildId, userDiscordId);
+    }
+
+    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source) {
+        return apiClient.awardXp(guildId, userDiscordId, source);
     }
 
     private CatalogueEnvelope normalizeCatalogue(String guildId, CatalogueEnvelope envelope) {

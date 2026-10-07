@@ -101,6 +101,7 @@ public class FichePersoCommand implements ISlashCommand {
                     - Rôle : **%s**
                     - Éléments : *%s*
                     - %s : **%d**
+                    - Constellations : **%d**
                     - Emblème : **%s**
                     __Statistiques de combat__ :
                     """.formatted(
@@ -109,7 +110,8 @@ public class FichePersoCommand implements ISlashCommand {
                     user.role().name(),
                     user.elements().stream().map(ApiUser.ApiElementSummary::name).reduce((a, b) -> a + ", " + b).orElse("Ø"),
                     Configuration.getInstance().getDotenv().get("XP_EMOJI", "XP"),
-                    0,
+                    user.progression() != null ? user.progression().totalXp() : 0,
+                    user.progression() != null ? user.progression().constellations() : 0,
                     emblem
             ));
 
