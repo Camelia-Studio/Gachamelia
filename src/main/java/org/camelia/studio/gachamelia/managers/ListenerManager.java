@@ -9,9 +9,12 @@ import org.camelia.studio.gachamelia.listeners.GuildMemberJoinListener;
 import org.camelia.studio.gachamelia.listeners.GuildMemberLeaveListener;
 import org.camelia.studio.gachamelia.listeners.GuildMemberRoleChangeListener;
 import org.camelia.studio.gachamelia.listeners.SlashCommandListener;
+import org.camelia.studio.gachamelia.listeners.MessageXpListener;
 import org.camelia.studio.gachamelia.services.CatalogueMessageService;
 import org.camelia.studio.gachamelia.services.GuildEmojiRefreshDebouncer;
 import org.camelia.studio.gachamelia.services.GuildRuntimeCoordinator;
+import org.camelia.studio.gachamelia.services.VoiceXpScheduler;
+import org.camelia.studio.gachamelia.services.XpAwardService;
 import org.camelia.studio.gachamelia.utils.RuntimeConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +26,7 @@ public class ListenerManager {
     private final CommandManager commandManager;
     private final List<ListenerAdapter> listener;
     private final Logger logger = LoggerFactory.getLogger(ListenerManager.class.getName());
+    private final VoiceXpScheduler voiceXpScheduler;
 
     public ListenerManager(
             CommandManager commandManager,
@@ -34,6 +38,8 @@ public class ListenerManager {
     ) {
         this.commandManager = commandManager;
         listener = new ArrayList<>();
+        XpAwardService xpAwardService = new XpAwardService(botApiService, coordinator);
+        voiceXpScheduler = new VoiceXpScheduler(xpAwardService);
 
         addListener(new SlashCommandListener(commandManager));
         addListener(new GuildLifecycleListener(coordinator));
@@ -55,10 +61,12 @@ public class ListenerManager {
                 runtimeConfiguration.syncBotMembers()
         ));
         addListener(new GuildEmojiListener(emojiRefreshDebouncer));
+        addListener(new MessageXpListener(xpAwardService));
     }
 
     public void registerListeners(JDA jda) {
         commandManager.registerCommands(jda);
+        voiceXpScheduler.start(jda);
 
         for (ListenerAdapter listenerAdapter : listener) {
             jda.addEventListener(listenerAdapter);
