@@ -14,13 +14,15 @@ public final class MessageXpListener extends ListenerAdapter {
 
     @Override
     public void onMessageReceived(@Nonnull MessageReceivedEvent event) {
-        if (!event.isFromGuild() || event.getAuthor().isBot() || !awarder.configured(event.getGuild().getId())) {
+        if (!event.isFromGuild() || event.getAuthor().isBot()
+                || !awarder.allowedChannel(event.getGuild().getId(), "message", event.getChannel().getId())) {
             return;
         }
         var guild = event.getGuild();
         var member = event.getMember();
         if (member != null) {
-            Thread.startVirtualThread(() -> awarder.award(guild, member, "message"));
+            String channelId = event.getChannel().getId();
+            Thread.startVirtualThread(() -> awarder.award(guild, member, "message", channelId));
         }
     }
 }

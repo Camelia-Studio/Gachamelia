@@ -55,8 +55,8 @@ public class GachameliaApiClient {
         return sendAuthorized("PUT", userPath(guildId, userDiscordId), EnsureUserRequest.staff(), UserEnvelope.class, true);
     }
 
-    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source) {
-        return sendAuthorized("POST", userPath(guildId, userDiscordId) + "/xp", Map.of("source", source), XpAwardEnvelope.class, true);
+    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source, String channelId) {
+        return sendAuthorized("POST", userPath(guildId, userDiscordId) + "/xp", Map.of("source", source, "channel_id", channelId), XpAwardEnvelope.class, true);
     }
 
     private String userPath(String guildId, String userDiscordId) {

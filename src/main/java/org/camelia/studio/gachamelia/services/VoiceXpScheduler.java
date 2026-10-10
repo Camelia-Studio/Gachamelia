@@ -47,13 +47,21 @@ public final class VoiceXpScheduler {
                     if (member.getUser().isBot() || member.getVoiceState() == null || member.getVoiceState().getChannel() == null) {
                         continue;
                     }
-                    String key = guild.getId() + ":" + member.getId();
+                    String channelId = member.getVoiceState().getChannel().getId();
+                    if (!awarder.allowedChannel(guild.getId(), "voice", channelId)) {
+                        continue;
+                    }
+                    String key = guild.getId() + ":" + member.getId() + ":" + channelId;
                     present.add(key);
                     Instant since = eligibleSince.putIfAbsent(key, now);
                     if (since != null && !now.isBefore(since.plus(period))) {
                         eligibleSince.put(key, now);
                         Thread.startVirtualThread(() -> {
-                            if (!awarder.award(guild, member, "voice")) {
+                            if (member.getVoiceState() == null || member.getVoiceState().getChannel() == null
+                                    || !channelId.equals(member.getVoiceState().getChannel().getId())) {
+                                return;
+                            }
+                            if (!awarder.award(guild, member, "voice", channelId)) {
                                 eligibleSince.replace(key, now, since);
                             }
                         });
