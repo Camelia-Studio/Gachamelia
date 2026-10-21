@@ -30,6 +30,7 @@ class GachameliaLifecycleTest {
         JDA jda = RuntimeListenersAndCommandsTestSupport.jdaWithShutdownRecorder(calls);
 
         Gachamelia.shutdown(
+                null,
                 catalogueRefreshScheduler,
                 emojiRefreshDebouncer,
                 coordinator,
