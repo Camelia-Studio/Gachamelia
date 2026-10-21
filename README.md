@@ -25,6 +25,7 @@ Variables runtime optionnelles :
 - `CATALOGUE_REFRESH_INTERVAL_MINUTES` : fréquence de synchronisation des catalogues, `5` par défaut.
 - `MEMBER_SYNC_CONCURRENCY` : nombre maximal d'appels membres concurrents pour l'ensemble des serveurs, `4` par défaut.
 - `SYNC_BOT_MEMBERS` : inclut les comptes bots dans la réconciliation lorsqu'il vaut `true`, `false` par défaut.
+- `HEALTHCHECK_URL` : URL d'une sonde de monitoring en mode push. Si elle est renseignée, le bot y envoie une requête `GET` toutes les 45 secondes tant qu'il est connecté à Discord et que son dernier appel à l'API n'a pas échoué (erreur réseau ou 5xx). Vide par défaut (healthcheck désactivé).
 
 Un serveur dont l'API retourne `validation.ready=false` reste connecté, mais les fonctionnalités membres restent désactivées jusqu'à ce que son catalogue soit prêt.
 
