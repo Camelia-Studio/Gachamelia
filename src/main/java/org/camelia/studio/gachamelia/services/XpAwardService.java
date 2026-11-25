@@ -38,8 +38,16 @@ public final class XpAwardService {
                 .orElse(0);
     }
 
-    public boolean award(Guild guild, Member member, String source) {
-        if (member.getUser().isBot() || !configured(guild.getId())) {
+    public boolean allowedChannel(String guildId, String source, String channelId) {
+        return coordinator.findReadyCatalogue(guildId)
+                .map(envelope -> envelope.catalogue().progression())
+                .filter(settings -> settings != null && settings.configured())
+                .map(settings -> settings.allows(source, channelId))
+                .orElse(false);
+    }
+
+    public boolean award(Guild guild, Member member, String source, String channelId) {
+        if (member.getUser().isBot() || !allowedChannel(guild.getId(), source, channelId)) {
             return false;
         }
         try {
@@ -49,7 +57,7 @@ public final class XpAwardService {
                 if (before == null || before.rank() == null || before.rank().staff()) {
                     return false;
                 }
-                XpAwardEnvelope awarded = botApiService.awardXp(guild.getId(), member.getId(), source);
+                XpAwardEnvelope awarded = botApiService.awardXp(guild.getId(), member.getId(), source, channelId);
                 ApiUser after = awarded.user();
                 if (after == null || after.rank() == null) {
                     return false;

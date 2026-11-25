@@ -17,10 +17,14 @@ class ProgressionContractTest {
                 {"ranks":[],"roles":[],"stats":[],"elements":[],"progression":{
                   "rank_ids":[1,2,3,4,5],"thresholds":[10000,150000,450000,960000],
                   "quarter_percentages":[20,40,60,80],"constellation_threshold":1111111,
-                  "message_xp":7,"voice_xp":15,"voice_interval_minutes":5}}
+                  "message_xp":7,"voice_xp":15,"voice_interval_minutes":5,
+                  "message_channel_ids":["123"],"voice_channel_ids":["456"]}}
                 """, ApiCatalogue.class);
         assertThat(catalogue.progression().configured()).isTrue();
         assertThat(catalogue.progression().voiceIntervalMinutes()).isEqualTo(5);
+        assertThat(catalogue.progression().allows("message", "123")).isTrue();
+        assertThat(catalogue.progression().allows("message", "456")).isFalse();
+        assertThat(catalogue.progression().allows("voice", "456")).isTrue();
 
         XpAwardEnvelope award = mapper.readValue("""
                 {"progression":{"gain":7,"rank_ups":[2],"new_constellations":0,"quarter":0},

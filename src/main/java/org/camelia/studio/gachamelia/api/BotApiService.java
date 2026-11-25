@@ -53,8 +53,8 @@ public class BotApiService {
         return apiClient.ensureStaffUser(guildId, userDiscordId);
     }
 
-    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source) {
-        return apiClient.awardXp(guildId, userDiscordId, source);
+    public XpAwardEnvelope awardXp(String guildId, String userDiscordId, String source, String channelId) {
+        return apiClient.awardXp(guildId, userDiscordId, source, channelId);
     }
 
     private CatalogueEnvelope normalizeCatalogue(String guildId, CatalogueEnvelope envelope) {
